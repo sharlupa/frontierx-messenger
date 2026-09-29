@@ -68,6 +68,11 @@ export const IMail = (p: Props) => <Svg {...p}><rect x="3" y="5" width="18" heig
 export const IWarning = (p: Props) => <Svg {...p}><path d="M12 3.5 2.5 20h19z" /><path d="M12 10v4.5" /><path d="M12 17.3h.01" /></Svg>
 export const IMap = (p: Props) => <Svg {...p}><path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6z" /><path d="M9 4v14M15 6v14" /></Svg>
 export const IGallery = (p: Props) => <Svg {...p}><rect x="3" y="3" width="8" height="8" rx="2" /><rect x="13" y="3" width="8" height="8" rx="2" /><rect x="3" y="13" width="8" height="8" rx="2" /><rect x="13" y="13" width="8" height="8" rx="2" /></Svg>
+export const IMicOff = (p: Props) => <Svg {...p}><path d="M15 10.5V5.5a3 3 0 0 0-5.6-1.5M9 9v1.5a3 3 0 0 0 4.7 2.5" /><path d="M5.5 11a6.5 6.5 0 0 0 10.6 5M18.4 12.6c.07-.5.1-1 .1-1.6" /><path d="M12 17.5V21M8.5 21h7M3 3l18 18" /></Svg>
+export const IPhoneCall = (p: Props) => <Svg {...p}><path d="M5 4.5h3.2l1.6 4-2 1.3a10.5 10.5 0 0 0 6.4 6.4l1.3-2 4 1.6V19a1.5 1.5 0 0 1-1.6 1.5A15.5 15.5 0 0 1 3.5 6.1 1.5 1.5 0 0 1 5 4.5z" /></Svg>
+export const IScreenShare = (p: Props) => <Svg {...p}><rect x="2.5" y="4" width="19" height="13" rx="2.5" /><path d="M8 21h8M12 17v4M12 13.5v-6M9.5 10l2.5-2.5 2.5 2.5" /></Svg>
+export const IMinimize = (p: Props) => <Svg {...p}><path d="M6 15l6-6 6 6" /></Svg>
+export const IExpand = (p: Props) => <Svg {...p}><path d="M6 9l6 6 6-6" /></Svg>
 export const IMic = (p: Props) => <Svg {...p}><rect x="9" y="2.5" width="6" height="11" rx="3" /><path d="M5.5 11a6.5 6.5 0 0 0 13 0" /><path d="M12 17.5V21M8.5 21h7" /></Svg>
 export const IAttach = (p: Props) => <Svg {...p}><path d="M21.4 11 12.3 20.1a5 5 0 0 1-7.1-7.1l9.2-9.2a3.5 3.5 0 0 1 5 5L10 18.2a2 2 0 0 1-2.8-2.8l8.5-8.5" /></Svg>
 export const IFormat = (p: Props) => <Svg {...p}><path d="M5 6.5V5h14v1.5" /><path d="M12 5v14" /><path d="M9 19h6" /></Svg>

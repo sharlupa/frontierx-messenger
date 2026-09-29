@@ -75,7 +75,7 @@ import { LinkApprovalSheet } from "../components/LinkApprovalSheet"
 import { ScheduledSheet } from "../components/ScheduledSheet"
 import { SafetySheet } from "../components/SafetySheet"
 import { Avatar, Badge, Banner, Button, IconButton, ListGroup, ListItem, Menu, Sheet, SwitchItem, type MenuItemSpec } from "../components/m3"
-import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPhone, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash } from "../components/m3icons"
+import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
 import { SearchEngine } from "../lib/search"
 import { useBackgroundAccounts } from "../lib/backgroundAccounts"
 import { syncWebPush } from "../lib/webpush"
@@ -2129,7 +2129,7 @@ export function Chat() {
 									</IconButton>
 									{!activeConversation.isSelf && activeConversation.kind !== "channel" && !directPeer?.isBot ? (
 										<IconButton label={t("call")} onClick={() => void call.startOrJoin(activeConversation.id)} disabled={!canSend || call.activeConversationId === activeConversation.id}>
-											<IPhone />
+											<IPhoneCall />
 										</IconButton>
 									) : null}
 									<IconButton label={t("more")} onClick={(event) => setHeaderMenu(event.currentTarget)}>
@@ -2145,7 +2145,7 @@ export function Chat() {
 								{searchQuery ? <span className="muted">{filteredDisplay.length} {t("matches")}</span> : null}
 							</div>
 						) : null}
-						{call.activeConversationId === activeConversation.id && call.callId ? <CallBar participantCount={call.participants.length} muted={call.muted} remotes={call.remotes} localStream={call.localStream} onToggleMute={call.toggleMute} sharing={call.sharing} screenStream={call.screenStream} remoteScreens={call.remoteScreens} onToggleShare={call.toggleShare} onLeave={() => void call.leave()} /> : null}
+						{call.activeConversationId === activeConversation.id && call.callId ? <CallBar participantCount={call.participants.length} muted={call.muted} remotes={call.remotes} localStream={call.localStream} onToggleMute={call.toggleMute} sharing={call.sharing} screenStream={call.screenStream} remoteScreens={call.remoteScreens} onToggleShare={call.toggleShare} onLeave={() => void call.leave()} title={convTitle(activeConversation)} avatar={directPeer ? directPeer.avatar : activeConversation.avatar} seed={directPeer ? directPeer.id : activeConversation.id} shape={directPeer ? "circle" : activeConversation.kind === "group" ? "group" : activeConversation.kind === "channel" ? "channel" : "circle"} /> : null}
 						<MessageThread
 							members={members} messages={filteredDisplay} isSelf={Boolean(activeConversation.isSelf)} readIds={readIds} conversationId={activeConversation.id}
 							reactions={reactions}
@@ -2262,7 +2262,7 @@ export function Chat() {
 				/>
 			) : null}
 			{showPollDialog ? <PollDialog opener={pollDialogOpenerRef.current} onClose={() => setShowPollDialog(false)} onCreate={handleCreatePoll} /> : null}
-			{incomingCall ? <IncomingCallBanner label={incomingCallLabel} onAccept={call.acceptIncoming} onDismiss={call.dismissIncoming} /> : null}
+			{incomingCall ? <IncomingCallBanner label={incomingCallLabel} avatar={incomingCallConv ? (incomingCallConv.peer?.avatar ?? incomingCallConv.avatar) : null} seed={incomingCallConv ? (incomingCallConv.peer?.id ?? incomingCallConv.id) : undefined} onAccept={call.acceptIncoming} onDismiss={call.dismissIncoming} /> : null}
 			{showMembers ? <MemberDialog members={members} onlineUserIds={onlineUserIds} lastSeen={lastSeen} currentUserId={currentUserId} canManage={Boolean(canModerate)} conversation={activeConversation ?? undefined} onSaveProfile={handleSaveConversationProfile} onClose={() => setShowMembers(false)} onRoleChange={handleRoleChange} onLeave={handleLeaveConversation} onDelete={handleDeleteConversation} onMembersChanged={handleMembersChanged} /> : null}
 			{settingsPage && user ? <SettingsSheet user={user} initialPage={settingsPage} onClose={() => setSettingsPage(null)} onUpdated={updateUser} backgroundUnread={backgroundUnread} /> : null}
 			{signOutOpen ? <SignOutSheet onClose={() => setSignOutOpen(false)} /> : null}

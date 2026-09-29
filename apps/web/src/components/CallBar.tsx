@@ -3,6 +3,8 @@ import type { RemoteAudio } from "../lib/useCall"
 import { useSettings } from "../state/settings"
 import { startLevelMeter } from "../lib/voice"
 import { ensureAudioContext } from "../lib/sound"
+import { Avatar } from "./m3"
+import { IExpand, IMic, IMicOff, IMinimize, IPhoneCall, IScreenShare } from "./m3icons"
 
 function ScreenVideo(props: { stream: MediaStream; muted: boolean; label: string; fsLabel: string }) {
 	const ref = useRef(null as HTMLVideoElement | null)
@@ -131,6 +133,10 @@ export function CallBar(props: {
 	remoteScreens: RemoteAudio[]
 	onToggleShare: () => void
 	onLeave: () => void
+	title: string
+	avatar?: string | null
+	seed?: string
+	shape?: "circle" | "group" | "channel"
 }) {
 	const { t } = useSettings()
 	const [blocked, setBlocked] = useState(false)
@@ -165,68 +171,116 @@ export function CallBar(props: {
 		}
 	}, [audioMap, props.remotes.length])
 
-	const shareBtn = createElement("button", { type: "button", className: "button ghost small", onClick: props.onToggleShare }, props.sharing ? t("stopShare") : t("shareScreen"))
 	const screenNodes: any[] = []
 	if (props.screenStream) screenNodes.push(createElement(ScreenVideo, { key: "local", stream: props.screenStream, muted: true, label: t('yourScreen'), fsLabel: t('fullscreen') }))
 	props.remoteScreens.forEach((entry) => screenNodes.push(createElement(ScreenVideo, { key: entry.peerId, stream: entry.stream, muted: false, label: t('sharedScreen'), fsLabel: t('fullscreen') })))
 	const screensNode = screenNodes.length ? createElement("div", { className: "call-screens" }, screenNodes) : null
 
+	const [collapsed, setCollapsed] = useState(false)
+	const elapsed = useElapsed()
+	const waiting = props.remotes.length === 0
+	const status = waiting ? t("callWaiting") : props.participantCount > 2 ? elapsed + " · " + props.participantCount + " " + t("inCall") : elapsed
+
+	const sink = (
+		<div className="call-audio-sink" aria-hidden="true">
+			{props.remotes.map((remote) => (
+				<RemoteAudioTrack key={remote.peerId} peerId={remote.peerId} stream={remote.stream} audioMap={audioMap} onBlocked={onBlocked} />
+			))}
+		</div>
+	)
+	const muteButton = (small: boolean) => (
+		<button type="button" className={"call-btn" + (small ? " small" : "") + (props.muted ? " off" : "")} onClick={props.onToggleMute} aria-pressed={props.muted} aria-label={props.muted ? t("unmute") : t("mute")} title={props.muted ? t("unmute") : t("mute")}>
+			{props.muted ? <IMicOff size={small ? 18 : 24} /> : <IMic size={small ? 18 : 24} />}
+		</button>
+	)
+	const endButton = (small: boolean) => (
+		<button type="button" className={"call-btn end" + (small ? " small" : "")} onClick={props.onLeave} aria-label={t("leave")} title={t("leave")}>
+			<IPhoneCall size={small ? 18 : 24} className="call-end-icon" />
+		</button>
+	)
+
+	if (collapsed) {
+		return (
+			<div className="call-mini" role="region" aria-label={t("voiceCall")}>
+				<button type="button" className="call-mini-main" onClick={() => setCollapsed(false)} aria-label={t("callExpand")}>
+					<Avatar src={props.avatar} label={props.title} seed={props.seed} size={32} shape={props.shape} />
+					<span className="call-mini-text">
+						<span className="call-mini-title">{props.title}</span>
+						<span className="call-mini-status"><span className={"call-live-dot" + (waiting ? " waiting" : "")} aria-hidden="true" />{status}</span>
+					</span>
+					<IExpand size={18} />
+				</button>
+				{blocked ? <button type="button" className="call-sound-btn" onClick={enableSound}>{t("enableSound")}</button> : null}
+				{muteButton(true)}
+				{endButton(true)}
+				{screensNode}
+				{sink}
+			</div>
+		)
+	}
+
 	return (
-		<div className="call-bar" role="region" aria-label={t("voiceCall")}>
-			<div className="call-bar-info">
-				<span className="call-bar-dot" aria-hidden="true" />
-				<span className="call-bar-label">{t("voiceCall")}</span>
-				<span className="call-bar-count">{props.participantCount} {t("inCall")}</span>
-				{props.remotes.length === 0 ? <span className="call-bar-wait">{t("waitingForOthers")}</span> : null}
+		<div className={"call-card" + (waiting ? " waiting" : " live")} role="region" aria-label={t("voiceCall")}>
+			<button type="button" className="call-collapse" onClick={() => setCollapsed(true)} aria-label={t("callMinimize")} title={t("callMinimize")}>
+				<IMinimize size={18} />
+			</button>
+			<div className="call-av-wrap">
+				<span className="call-ring" aria-hidden="true" />
+				<span className="call-ring second" aria-hidden="true" />
+				<Avatar src={props.avatar} label={props.title} seed={props.seed} size={104} shape={props.shape} className="call-av-img" />
 			</div>
-			<div className="call-bar-mic">
-				<span className="call-bar-mic-label">{props.muted ? t("muted") : t("yourMic")}</span>
-				<MicMeter stream={props.localStream} muted={props.muted} />
+			<div className="call-card-text">
+				<div className="call-card-title">{props.title}</div>
+				<div className="call-card-status">{status}</div>
 			</div>
-			<div className="call-bar-actions">
-				{blocked ? (
-					<button type="button" className="button small primary" onClick={enableSound}>
-						{t("enableSound")}
-					</button>
-				) : null}
-			{shareBtn}
-				<button type="button" className="button ghost small" onClick={props.onToggleMute}>
-					{props.muted ? t("unmute") : t("mute")}
+			<MicMeter stream={props.localStream} muted={props.muted} />
+			{blocked ? <button type="button" className="call-sound-btn" onClick={enableSound}>{t("enableSound")}</button> : null}
+			<div className="call-card-actions">
+				{muteButton(false)}
+				<button type="button" className={"call-btn" + (props.sharing ? " on" : "")} onClick={props.onToggleShare} aria-pressed={props.sharing} aria-label={props.sharing ? t("stopShare") : t("shareScreen")} title={props.sharing ? t("stopShare") : t("shareScreen")}>
+					<IScreenShare size={24} />
 				</button>
-				<button type="button" className="button small call-leave" onClick={props.onLeave}>
-					{t("leave")}
-				</button>
+				{endButton(false)}
 			</div>
-		{screensNode}
-			<div className="call-audio-sink" aria-hidden="true">
-				{props.remotes.map((remote) => (
-					<RemoteAudioTrack
-						key={remote.peerId}
-						peerId={remote.peerId}
-						stream={remote.stream}
-						audioMap={audioMap}
-						onBlocked={onBlocked}
-					/>
-				))}
-			</div>
+			{screensNode}
+			{sink}
 		</div>
 	)
 }
 
-export function IncomingCallBanner(props: { label: string; onAccept: () => void; onDismiss: () => void }) {
+// mm:ss (h:mm:ss after an hour) since the call view appeared.
+function useElapsed(): string {
+	const [started] = useState(() => Date.now())
+	const [now, setNow] = useState(() => Date.now())
+	useEffect(() => {
+		const timer = window.setInterval(() => setNow(Date.now()), 1000)
+		return () => window.clearInterval(timer)
+	}, [])
+	const total = Math.max(0, Math.floor((now - started) / 1000))
+	const h = Math.floor(total / 3600)
+	const m = Math.floor((total % 3600) / 60)
+	const sec = String(total % 60).padStart(2, "0")
+	return h > 0 ? h + ":" + String(m).padStart(2, "0") + ":" + sec : m + ":" + sec
+}
+
+export function IncomingCallBanner(props: { label: string; onAccept: () => void; onDismiss: () => void; avatar?: string | null; seed?: string }) {
 	const { t } = useSettings()
 	return (
 		<div className="call-incoming" role="alertdialog" aria-label={t("incomingCall")}>
+			<div className="call-incoming-av">
+				<span className="call-ring" aria-hidden="true" />
+				<Avatar src={props.avatar} label={props.label} seed={props.seed} size={48} />
+			</div>
 			<div className="call-incoming-text">
-				<strong>{t("incomingCall")}</strong>
-				<span>{props.label}</span>
+				<strong>{props.label}</strong>
+				<span>{t("incomingCall")}</span>
 			</div>
 			<div className="call-incoming-actions">
-				<button type="button" className="button primary small" onClick={props.onAccept}>
-					{t("join")}
+				<button type="button" className="call-btn small end" onClick={props.onDismiss} aria-label={t("dismiss")} title={t("dismiss")}>
+					<IPhoneCall size={18} className="call-end-icon" />
 				</button>
-				<button type="button" className="button ghost small" onClick={props.onDismiss}>
-					{t("dismiss")}
+				<button type="button" className="call-btn small accept" onClick={props.onAccept} aria-label={t("join")} title={t("join")}>
+					<IPhoneCall size={18} />
 				</button>
 			</div>
 		</div>

@@ -1606,3 +1606,286 @@ button.thread-title-wrap:hover {
 	text-align: center;
 	overflow-wrap: anywhere;
 }
+
+/* --- calls: a card like the one on the site, or a slim bar when minimized --- */
+
+@keyframes fx-call-ring {
+	from { scale: 0.92; opacity: 0.9; border-radius: 50%; }
+	to { scale: 1.5; opacity: 0; border-radius: 38%; }
+}
+@keyframes fx-call-in {
+	from { opacity: 0; transform: translateY(-12px) scale(0.94); }
+	to { opacity: 1; transform: none; }
+}
+
+.call-card {
+	position: relative;
+	display: grid;
+	justify-items: center;
+	gap: 14px;
+	width: min(360px, calc(100% - 28px));
+	margin: 12px auto 4px;
+	padding: 26px 22px 22px;
+	border-radius: 32px;
+	background: var(--m3-surface-container-high);
+	box-shadow: 0 16px 44px color-mix(in srgb, #000 26%, transparent);
+	animation: fx-call-in var(--m3-dur) var(--m3-spring) both;
+	flex: 0 0 auto;
+}
+.call-collapse {
+	position: absolute;
+	top: 12px;
+	right: 12px;
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: background-color 150ms var(--m3-effects), border-radius var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.call-collapse:hover {
+	background: var(--m3-state-hover);
+	border-radius: 12px;
+}
+.call-av-wrap {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 104px;
+	height: 104px;
+	margin: 10px 0 4px;
+}
+.call-av-img {
+	position: relative;
+	font-size: 34px;
+}
+.call-ring {
+	position: absolute;
+	inset: -10px;
+	border: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+	border-radius: 50%;
+	opacity: 0;
+	pointer-events: none;
+}
+.call-card.waiting .call-ring,
+.call-incoming .call-ring {
+	animation: fx-call-ring 2.4s var(--m3-effects) infinite;
+}
+.call-card.waiting .call-ring.second {
+	animation-delay: 1.2s;
+}
+/* In a live call the ring stays as a calm halo. */
+.call-card.live .call-ring:not(.second) {
+	opacity: 0.55;
+	scale: 1.02;
+	border-color: color-mix(in srgb, var(--ok) 60%, transparent);
+}
+.call-card-text {
+	text-align: center;
+}
+.call-card-title {
+	font-size: 20px;
+	font-weight: 800;
+	letter-spacing: -0.01em;
+	color: var(--text-strong);
+	overflow-wrap: anywhere;
+}
+.call-card-status {
+	margin-top: 2px;
+	font-size: 14px;
+	color: var(--text-muted);
+	font-variant-numeric: tabular-nums;
+}
+.call-card .mic-indicator {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--text-muted);
+}
+.call-card-actions {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	margin-top: 4px;
+}
+.call-btn {
+	display: grid;
+	place-items: center;
+	width: 56px;
+	height: 56px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--m3-surface-container-highest);
+	color: var(--text-strong);
+	cursor: pointer;
+	transition:
+		border-radius var(--m3-dur) var(--m3-spring),
+		scale var(--m3-dur-fast) var(--m3-spring-fast),
+		background-color 180ms var(--m3-effects),
+		width var(--m3-dur) var(--m3-spring);
+}
+.call-btn:hover {
+	border-radius: var(--m3-shape-m);
+}
+.call-btn:active {
+	scale: 0.9;
+	border-radius: var(--m3-shape-s);
+}
+.call-btn.off {
+	background: var(--text-strong);
+	color: var(--bg-panel);
+	border-radius: var(--m3-shape-m);
+}
+.call-btn.on {
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+	border-radius: var(--m3-shape-m);
+}
+.call-btn.end {
+	width: 76px;
+	border-radius: var(--m3-shape-l);
+	background: #e5484d;
+	color: #fff;
+}
+.call-btn.end:hover {
+	border-radius: 28px;
+	background: #d73f44;
+}
+.call-btn.accept {
+	background: #2fb36a;
+	color: #fff;
+}
+.call-end-icon {
+	rotate: 135deg;
+}
+.call-btn.small {
+	width: 40px;
+	height: 40px;
+}
+.call-btn.small.end {
+	width: 52px;
+}
+.call-sound-btn {
+	padding: 8px 16px;
+	border: 0;
+	border-radius: 18px;
+	background: var(--accent);
+	color: var(--on-accent);
+	font: inherit;
+	font-weight: 700;
+	cursor: pointer;
+}
+.call-card .call-screens,
+.call-mini .call-screens {
+	width: 100%;
+	grid-column: 1 / -1;
+}
+
+.call-mini {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 10px 14px 0;
+	padding: 6px 8px 6px 6px;
+	border-radius: 26px;
+	background: var(--m3-surface-container-high);
+	box-shadow: 0 6px 18px color-mix(in srgb, #000 18%, transparent);
+	animation: fx-call-in var(--m3-dur-fast) var(--m3-spring) both;
+	flex: 0 0 auto;
+}
+.call-mini-main {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	padding: 2px 8px 2px 2px;
+	border: 0;
+	border-radius: 22px;
+	background: transparent;
+	color: var(--text-muted);
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.call-mini-main:hover {
+	background: var(--m3-state-hover);
+}
+.call-mini-text {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-width: 0;
+}
+.call-mini-title {
+	overflow: hidden;
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--text-strong);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.call-mini-status {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 12.5px;
+	font-variant-numeric: tabular-nums;
+}
+.call-live-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--ok);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+}
+.call-live-dot.waiting {
+	background: var(--accent);
+	animation: m3-typing 1.2s ease-in-out infinite;
+}
+
+.call-incoming {
+	gap: 14px;
+	padding: 12px 12px 12px 14px;
+	border: 0;
+	border-radius: 28px;
+	background: var(--m3-surface-container-high);
+	box-shadow: 0 18px 44px color-mix(in srgb, #000 34%, transparent);
+	animation: fx-call-in var(--m3-dur) var(--m3-spring-bouncy) both;
+}
+.call-incoming-av {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 48px;
+	height: 48px;
+}
+.call-incoming-av .call-ring {
+	inset: -6px;
+}
+.call-incoming-text strong {
+	color: var(--text-strong);
+}
+.call-incoming-text span {
+	font-size: 13px;
+	color: var(--text-muted);
+}
+.call-incoming-actions {
+	display: flex;
+	gap: 10px;
+}
+@media (max-width: 520px) {
+	.call-card {
+		gap: 10px;
+		padding: 20px 16px 18px;
+	}
+	.call-incoming-actions {
+		margin-left: auto;
+	}
+}
