@@ -2053,3 +2053,12 @@ a.tile:hover .tile-more svg {
 .nav-links a {
 	white-space: nowrap;
 }
+
+/* No rectangle flashing over tapped buttons and links on phones. */
+html,
+* {
+	-webkit-tap-highlight-color: transparent;
+}
+:focus:not(:focus-visible) {
+	outline: none;
+}

@@ -1889,3 +1889,23 @@ button.thread-title-wrap:hover {
 		margin-left: auto;
 	}
 }
+
+/* No grey/blue rectangle flashing over whatever is tapped (Android, iPhone):
+   buttons show their own pressed state instead. Keyboard focus rings stay. */
+html {
+	-webkit-tap-highlight-color: transparent;
+}
+*,
+*::before,
+*::after {
+	-webkit-tap-highlight-color: transparent;
+}
+:focus:not(:focus-visible) {
+	outline: none;
+}
+.m3-sheet:focus,
+.m3-sheet:focus-visible,
+.m3-menu:focus,
+[tabindex="-1"]:focus {
+	outline: none;
+}
