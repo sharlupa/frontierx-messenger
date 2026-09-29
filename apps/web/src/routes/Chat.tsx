@@ -75,7 +75,7 @@ import { LinkApprovalSheet } from "../components/LinkApprovalSheet"
 import { ScheduledSheet } from "../components/ScheduledSheet"
 import { SafetySheet } from "../components/SafetySheet"
 import { Avatar, Badge, Banner, Button, IconButton, ListGroup, ListItem, Menu, Sheet, SwitchItem, type MenuItemSpec } from "../components/m3"
-import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall, IChat } from "../components/m3icons"
+import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
 import { SearchEngine } from "../lib/search"
 import { useBackgroundAccounts } from "../lib/backgroundAccounts"
 import { syncWebPush } from "../lib/webpush"
@@ -210,8 +210,12 @@ export function Chat() {
 	const [pendingChatAction, setPendingChatAction] = useState<{ id: string; key: string } | null>(null)
 	const headerMenuItemsRef = useRef<MenuItemSpec[]>([])
 	const [choice, setChoice] = useState<"mute" | "ttl" | "folders" | null>(null)
+	// The chat the mute and folder sheets act on: a chat picked in the list's
+	// menu, or the open one.
+	const [choiceTarget, setChoiceTarget] = useState<string | null>(null)
+	const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null)
+	const [safetyTarget, setSafetyTarget] = useState<{ name: string; key: string | null } | null>(null)
 	const [showThreadSearch, setShowThreadSearch] = useState(false)
-	const [safetyOpen, setSafetyOpen] = useState(false)
 	const [signOutOpen, setSignOutOpen] = useState(false)
 	const [botCommands, setBotCommands] = useState<BotCommand[]>([])
 	const backgroundUnread = useBackgroundAccounts(accounts, user?.id ?? null, (account) => {
@@ -312,7 +316,6 @@ export function Chat() {
 	const [showFriends, setShowFriends] = useState(false)
 	const [friendRequestCount, setFriendRequestCount] = useState(0)
 	const [inviteCode, setInviteCode] = useState<string | null>(null)
-	const [confirmRemoveFriend, setConfirmRemoveFriend] = useState(false)
 	const [groupInvites, setGroupInvites] = useState<{ id: string; conversationId: string; conversationTitle: string | null; conversationKind: string; fromUser: string; fromName: string | null; createdAt: string }[]>([])
 	const [forwardFor, setForwardFor] = useState<DisplayMessage | null>(null)
 	const [commentsFor, setCommentsFor] = useState<DisplayMessage | null>(null)
@@ -1282,8 +1285,8 @@ export function Chat() {
 			throw new Error(message)
 		}
 	}, [])
-	const handleMuteFor = useCallback(async (durationMs: number | null) => {
-		const conversation = conversations.find((item) => item.id === activeIdRef.current)
+	const handleMuteFor = useCallback(async (durationMs: number | null, conversationId?: string) => {
+		const conversation = conversations.find((item) => item.id === (conversationId ?? activeIdRef.current))
 		if (!conversation) return
 		try {
 			const until = durationMs === null ? null : new Date(Date.now() + durationMs).toISOString()
@@ -1293,8 +1296,8 @@ export function Chat() {
 			setError(errMessage(err, tt("muteFailed")))
 		}
 	}, [conversations])
-	const handleArchive = useCallback(async () => {
-		const conversation = conversations.find((item) => item.id === activeIdRef.current)
+	const handleArchive = useCallback(async (conversationId?: string) => {
+		const conversation = conversations.find((item) => item.id === (conversationId ?? activeIdRef.current))
 		if (!conversation) return
 		setError(null)
 		try {
@@ -1930,8 +1933,8 @@ export function Chat() {
 		if (!pendingChatAction || activeConversation?.id !== pendingChatAction.id) return
 		const key = pendingChatAction.key
 		setPendingChatAction(null)
-		const timer = window.setTimeout(() => headerMenuItemsRef.current.find((item) => item.key === key)?.onSelect(), 60)
-		return () => window.clearTimeout(timer)
+		// Not cleared with the effect: clearing the pending action re-runs it.
+		window.setTimeout(() => headerMenuItemsRef.current.find((item) => item.key === key)?.onSelect(), 80)
 	}, [pendingChatAction, activeConversation?.id])
 
 	// Ctrl/Cmd+K searches everywhere.
@@ -1971,40 +1974,46 @@ export function Chat() {
 		{ key: "signout", label: t("signOut"), icon: <ILogout size={20} />, danger: true, onSelect: () => setSignOutOpen(true) },
 	]
 
+	const choiceConversation = conversations.find((item) => item.id === (choiceTarget ?? activeId)) ?? null
 	const headerMenuItems: MenuItemSpec[] = activeConversation ? [
 		...(!activeConversation.isSelf && activeConversation.kind !== "direct" ? [{ key: "members", label: t("members"), icon: <IPeople size={20} />, onSelect: () => setShowMembers(true) }] : []),
-		...(directPeer ? [{ key: "safety", label: t("encryptionVerify"), icon: <IShield size={20} />, onSelect: () => setSafetyOpen(true) }] : []),
-		...(!activeConversation.isSelf ? [{ key: "mute", label: activeMuted ? t("unmute") : t("notifications"), icon: activeMuted ? <IBell size={20} /> : <IBellOff size={20} />, onSelect: () => (activeMuted ? void handleMuteFor(null) : setChoice("mute")) }] : []),
+		...(directPeer ? [{ key: "safety", label: t("encryptionVerify"), icon: <IShield size={20} />, onSelect: () => setSafetyTarget({ name: directPeer.displayName || directPeer.username, key: members.find((member) => member.userId === directPeer.id)?.publicKey ?? null }) }] : []),
+		...(!activeConversation.isSelf ? [{ key: "mute", label: activeMuted ? t("unmute") : t("notifications"), icon: activeMuted ? <IBell size={20} /> : <IBellOff size={20} />, onSelect: () => (activeMuted ? void handleMuteFor(null) : (setChoiceTarget(null), setChoice("mute"))) }] : []),
 		{ key: "scheduled", label: t("scheduledTitle") + (activeConversation.scheduledCount ? " · " + String(activeConversation.scheduledCount) : ""), icon: <ISchedule size={20} />, onSelect: () => setShowScheduled(true) },
 		{ key: "gallery", label: t("galleryOpen"), icon: <IGallery size={20} />, onSelect: () => setShowGallery(true) },
 		{ key: "export", label: exporting ? t("exporting") : t("exportChat"), icon: <IDownload size={20} />, disabled: exporting, onSelect: () => void handleExportChat() },
 		...(canModerate ? [{ key: "ttl", label: t("ttlMenu"), icon: <IClock size={20} />, hint: activeConversation.ttlSeconds ? ttlLabel(activeConversation.ttlSeconds, t) : undefined, onSelect: () => setChoice("ttl") }] : []),
-		{ key: "folders", label: t("addToFolder"), icon: <IGallery size={20} />, onSelect: () => (folders.length === 0 ? setShowFolders(true) : setChoice("folders")) },
+		{ key: "folders", label: t("addToFolder"), icon: <IGallery size={20} />, onSelect: () => (folders.length === 0 ? setShowFolders(true) : (setChoiceTarget(null), setChoice("folders"))) },
 		...(!activeConversation.isSelf ? [{ key: "pin", label: pinnedChatSet.has(activeConversation.id) ? t("unpinChat") : t("pinChat"), icon: <IPin size={20} />, onSelect: () => togglePinChat(activeConversation.id) }] : []),
 		...(!activeConversation.isSelf ? [{ key: "archive", label: activeConversation.archivedAt ? t("unarchive") : t("archive"), icon: <IStorage size={20} />, onSelect: () => void handleArchive() }] : []),
-		...(directPeer ? [{ key: "remove", label: t("removeFriend"), icon: <ITrash size={20} />, danger: true, onSelect: () => setConfirmRemoveFriend(true) }] : []),
+		...(directPeer ? [{ key: "remove", label: t("removeFriend"), icon: <ITrash size={20} />, danger: true, onSelect: () => setRemoveTarget({ id: directPeer.id, name: directPeer.displayName || directPeer.username }) }] : []),
 	] : []
 
 	// What a chat's menu offers when it is not the open one; anything that needs
 	// the chat opens it first and then runs the same action as the ⋮ menu.
 	const chatMenuItems = (conversation: Conversation): MenuItemSpec[] => {
 		if (conversation.id === activeConversation?.id) return headerMenuItems
-		const later = (key: string) => () => {
-			setPendingChatAction({ id: conversation.id, key })
-			setActiveId(conversation.id)
-		}
 		const peer = conversation.kind === "direct" && !conversation.isSelf ? conversation.peer ?? null : null
 		const muted = Boolean(conversation.mutedUntil && new Date(conversation.mutedUntil).getTime() > Date.now())
 		return [
-			{ key: "open", label: t("openChat"), icon: <IChat size={20} />, onSelect: () => setActiveId(conversation.id) },
-			...(!conversation.isSelf && conversation.kind !== "direct" ? [{ key: "members", label: t("members"), icon: <IPeople size={20} />, onSelect: later("members") }] : []),
-			...(peer && !peer.isBot ? [{ key: "safety", label: t("encryptionVerify"), icon: <IShield size={20} />, onSelect: later("safety") }] : []),
-			...(!conversation.isSelf ? [{ key: "mute", label: muted ? t("unmute") : t("notifications"), icon: muted ? <IBell size={20} /> : <IBellOff size={20} />, onSelect: later("mute") }] : []),
-			{ key: "gallery", label: t("galleryOpen"), icon: <IGallery size={20} />, onSelect: later("gallery") },
-			{ key: "folders", label: t("addToFolder"), icon: <IGallery size={20} />, onSelect: later("folders") },
+			// Members are managed inside the chat, so this one opens it.
+			...(!conversation.isSelf && conversation.kind !== "direct" ? [{ key: "members", label: t("members"), icon: <IPeople size={20} />, onSelect: () => { setPendingChatAction({ id: conversation.id, key: "members" }); setActiveId(conversation.id) } }] : []),
+			...(peer && !peer.isBot ? [{
+				key: "safety",
+				label: t("encryptionVerify"),
+				icon: <IShield size={20} />,
+				onSelect: () => {
+					const name = peer.displayName || peer.username
+					void api.getConversationMembers(conversation.id)
+						.then((res) => setSafetyTarget({ name, key: res.members.find((member) => member.userId === peer.id)?.publicKey ?? null }))
+						.catch(() => setSafetyTarget({ name, key: null }))
+				},
+			}] : []),
+			...(!conversation.isSelf ? [{ key: "mute", label: muted ? t("unmute") : t("notifications"), icon: muted ? <IBell size={20} /> : <IBellOff size={20} />, onSelect: () => (muted ? void handleMuteFor(null, conversation.id) : (setChoiceTarget(conversation.id), setChoice("mute"))) }] : []),
+			{ key: "folders", label: t("addToFolder"), icon: <IGallery size={20} />, onSelect: () => (folders.length === 0 ? setShowFolders(true) : (setChoiceTarget(conversation.id), setChoice("folders"))) },
 			...(!conversation.isSelf ? [{ key: "pin", label: pinnedChatSet.has(conversation.id) ? t("unpinChat") : t("pinChat"), icon: <IPin size={20} />, onSelect: () => togglePinChat(conversation.id) }] : []),
-			...(!conversation.isSelf ? [{ key: "archive", label: conversation.archivedAt ? t("unarchive") : t("archive"), icon: <IStorage size={20} />, onSelect: later("archive") }] : []),
-			...(peer ? [{ key: "remove", label: t("removeFriend"), icon: <ITrash size={20} />, danger: true, onSelect: later("remove") }] : []),
+			...(!conversation.isSelf ? [{ key: "archive", label: conversation.archivedAt ? t("unarchive") : t("archive"), icon: <IStorage size={20} />, onSelect: () => void handleArchive(conversation.id) }] : []),
+			...(peer ? [{ key: "remove", label: t("removeFriend"), icon: <ITrash size={20} />, danger: true, onSelect: () => setRemoveTarget({ id: peer.id, name: peer.displayName || peer.username }) }] : []),
 		]
 	}
 
@@ -2144,7 +2153,7 @@ export function Chat() {
 						<header className="thread-header">
 							<div className="thread-header-row">
 								<button type="button" className="thread-back" aria-label={t("back")} onClick={() => setActiveId(null)}><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg></button>
-								<button type="button" className="thread-title-wrap" onClick={() => { if (activeConversation.kind !== "direct" && !activeConversation.isSelf) setShowMembers(true); else if (directPeer) setSafetyOpen(true) }}>
+								<button type="button" className="thread-title-wrap" onClick={() => { if (activeConversation.kind !== "direct" && !activeConversation.isSelf) setShowMembers(true); else if (directPeer) setSafetyTarget({ name: directPeer.displayName || directPeer.username, key: members.find((member) => member.userId === directPeer.id)?.publicKey ?? null }) }}>
 									{directPeer ? <Avatar src={directPeer.avatar} label={directPeer.displayName || directPeer.username} seed={directPeer.id} size={40} className="thread-avatar" /> : activeConversation.kind !== "direct" ? <Avatar src={activeConversation.avatar} label={convTitle(activeConversation)} seed={activeConversation.id} size={40} shape={activeConversation.kind === "group" ? "group" : "channel"} className="thread-avatar" /> : null}
 									<div>
 										<h2 className="thread-title">{convTitle(activeConversation)}{directPeer?.isBot ? <span className="bot-badge"><IBot size={12} /> BOT</span> : null}</h2>
@@ -2312,11 +2321,11 @@ export function Chat() {
 			{showScheduled && activeConversation ? <ScheduledSheet conversationId={activeConversation.id} version={scheduledVersion} onClose={() => setShowScheduled(false)} onSent={appendMessage} /> : null}
 			{unlockOpen && keys.status === "locked" ? <KeyUnlockSheet info={keys.info} onClose={() => setUnlockOpen(false)} /> : null}
 			{linkRequest && keys.status === "ready" ? <LinkApprovalSheet request={linkRequest} onClose={() => setLinkRequest(null)} /> : null}
-			{safetyOpen && directPeer ? <SafetySheet peerName={directPeer.displayName || directPeer.username} peerKey={members.find((member) => member.userId === directPeer.id)?.publicKey ?? null} ownKey={keys.status === "ready" ? keys.session.publicKey : null} onClose={() => setSafetyOpen(false)} /> : null}
+			{safetyTarget ? <SafetySheet peerName={safetyTarget.name} peerKey={safetyTarget.key} ownKey={keys.status === "ready" ? keys.session.publicKey : null} onClose={() => setSafetyTarget(null)} /> : null}
 			{accountMenu ? <Menu anchor={accountMenu} items={accountMenuItems} onClose={() => setAccountMenu(null)} align="start" placement="above" /> : null}
 			{headerMenu ? <Menu anchor={headerMenu} items={headerMenuItems} onClose={() => setHeaderMenu(null)} /> : null}
 			{chatMenu ? <Menu anchor={null} point={{ x: chatMenu.x, y: chatMenu.y }} items={chatMenuItems(chatMenu.conversation)} onClose={() => setChatMenu(null)} /> : null}
-			{choice === "mute" && activeConversation ? (
+			{choice === "mute" && choiceConversation ? (
 				<ChoiceSheet
 					title={t("notifications")}
 					subtitle={t("muteFor")}
@@ -2328,7 +2337,7 @@ export function Chat() {
 						{ value: String(7 * 24 * 60 * 60 * 1000), label: t("mute1w") },
 						{ value: String(MUTE_FOREVER_MS), label: t("muteForever") },
 					]}
-					onPick={(value) => void handleMuteFor(Number(value))}
+					onPick={(value) => void handleMuteFor(Number(value), choiceConversation.id)}
 					onClose={() => setChoice(null)}
 				/>
 			) : null}
@@ -2348,12 +2357,12 @@ export function Chat() {
 					onClose={() => setChoice(null)}
 				/>
 			) : null}
-			{choice === "folders" && activeConversation ? (
+			{choice === "folders" && choiceConversation ? (
 				<Sheet title={t("addToFolder")} icon={<IGallery />} iconShape="pentagon" iconTone="teal" onClose={() => setChoice(null)} size="sm">
 					<ListGroup>
 						{folders.map((folder) => {
-							const inFolder = folder.conversationIds.includes(activeConversation.id)
-							return <SwitchItem key={folder.id} title={folder.name} checked={inFolder} onChange={(next) => void handleToggleChatFolder(folder.id, activeConversation.id, next)} />
+							const inFolder = folder.conversationIds.includes(choiceConversation.id)
+							return <SwitchItem key={folder.id} title={folder.name} checked={inFolder} onChange={(next) => void handleToggleChatFolder(folder.id, choiceConversation.id, next)} />
 						})}
 						<ListItem title={t("manageFolders")} onClick={() => { setChoice(null); setShowFolders(true) }} chevron />
 					</ListGroup>
@@ -2383,16 +2392,16 @@ export function Chat() {
 					<p className="settings-intro">{t("inviteJoinBody")}</p>
 				</Sheet>
 			) : null}
-			{confirmRemoveFriend && directPeer ? (
-				<Sheet title={t("removeFriendConfirm")} icon={<ITrash />} iconShape="burst" iconTone="error" onClose={() => setConfirmRemoveFriend(false)} size="sm" role="alertdialog"
+			{removeTarget ? (
+				<Sheet title={t("removeFriendConfirm")} icon={<ITrash />} iconShape="burst" iconTone="error" onClose={() => setRemoveTarget(null)} size="sm" role="alertdialog"
 					actions={
 						<>
-							<Button variant="text" onClick={() => setConfirmRemoveFriend(false)}>{t("cancel")}</Button>
-							<Button variant="danger" onClick={() => { if (!directPeer) return; const pid = directPeer.id; setConfirmRemoveFriend(false); void api.removeFriend(pid).then(() => { setConversations((prev) => prev.filter((c) => !(c.peer && c.peer.id === pid))); setActiveId(null) }).catch((remErr) => setError(errMessage(remErr, tt("removeFriendFailed")))) }}>{t("removeFriend")}</Button>
+							<Button variant="text" onClick={() => setRemoveTarget(null)}>{t("cancel")}</Button>
+							<Button variant="danger" onClick={() => { const pid = removeTarget.id; setRemoveTarget(null); void api.removeFriend(pid).then(() => { const removed = conversations.find((c) => c.peer && c.peer.id === pid); setConversations((prev) => prev.filter((c) => !(c.peer && c.peer.id === pid))); if (removed && removed.id === activeIdRef.current) setActiveId(null) }).catch((remErr) => setError(errMessage(remErr, tt("removeFriendFailed")))) }}>{t("removeFriend")}</Button>
 						</>
 					}
 				>
-					<p className="settings-intro">{directPeer.displayName || directPeer.username}</p>
+					<p className="settings-intro">{removeTarget.name}</p>
 				</Sheet>
 			) : null}
 		</div>

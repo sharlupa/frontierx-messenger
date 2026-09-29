@@ -10,6 +10,7 @@ import "./mobile-fixes.css"
 import "./expressive.css"
 import "./m3.css"
 import "./m3-screens.css"
+import "./m3-emoji.css"
 
 const rootElement = document.getElementById("root")
 if (!rootElement) {

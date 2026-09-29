@@ -1,0 +1,230 @@
+/* ==========================================================================
+   Emoji, stickers and GIFs panel, and the reaction picker, in the M3
+   Expressive style of the rest of the app. Loaded after m3-screens.css.
+   ========================================================================== */
+
+.emoji-panel {
+	position: relative;
+	width: 360px;
+	max-width: calc(100vw - 24px);
+	padding: 10px 10px 8px;
+	border: 0;
+	border-radius: 28px;
+	background: var(--m3-surface-container-high);
+	box-shadow: 0 18px 44px color-mix(in srgb, #000 30%, transparent);
+	gap: 6px;
+}
+
+/* Tabs: a segmented pill. */
+.emoji-tabs {
+	display: flex;
+	gap: 4px;
+	margin-right: 44px;
+	padding: 4px;
+	border-radius: 999px;
+	background: var(--m3-surface-container-highest);
+}
+.emoji-tab {
+	flex: 1;
+	min-height: 32px;
+	padding: 0 10px;
+	border: 0;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 13px;
+	font-weight: 700;
+	transition: background-color 180ms var(--m3-effects), color 180ms var(--m3-effects), scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.emoji-tab:hover {
+	background: var(--m3-state-hover);
+	color: var(--text);
+}
+.emoji-tab:active {
+	scale: 0.95;
+}
+.emoji-tab.active {
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+}
+
+.emoji-close {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	display: grid;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: var(--m3-surface-container-highest);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: border-radius var(--m3-dur-fast) var(--m3-spring-fast), color 150ms var(--m3-effects);
+}
+.emoji-close:hover {
+	border-radius: 14px;
+	color: var(--text-strong);
+}
+.emoji-panel.compact .emoji-close {
+	display: none;
+}
+
+/* Categories: jump straight to a group. */
+.emoji-nav {
+	display: flex;
+	gap: 2px;
+	overflow-x: auto;
+	scrollbar-width: none;
+	padding: 2px 0;
+}
+.emoji-nav::-webkit-scrollbar {
+	display: none;
+}
+.emoji-panel:not(.compact) .emoji-nav {
+	margin-top: 2px;
+}
+.emoji-panel.compact .emoji-nav {
+	margin-right: 0;
+}
+.emoji-nav-btn {
+	display: grid;
+	flex: 0 0 auto;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	border: 0;
+	border-radius: 12px;
+	background: transparent;
+	font-size: 19px;
+	line-height: 1;
+	cursor: pointer;
+	filter: grayscale(0.55);
+	opacity: 0.8;
+	transition: filter 150ms var(--m3-effects), opacity 150ms var(--m3-effects), background-color 150ms var(--m3-effects), border-radius var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.emoji-nav-btn:hover {
+	filter: none;
+	opacity: 1;
+	background: var(--m3-state-hover);
+	border-radius: 18px;
+}
+
+.emoji-tab-body {
+	max-height: 280px;
+	padding: 2px 2px 6px;
+	border-radius: 18px;
+	scrollbar-width: thin;
+	scrollbar-color: color-mix(in srgb, var(--accent) 45%, transparent) transparent;
+}
+.emoji-grid {
+	gap: 12px;
+}
+.emoji-group-title {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	padding: 4px 6px 6px;
+	background: var(--m3-surface-container-high);
+	color: var(--accent);
+	font-size: 12.5px;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+}
+.emoji-group-items {
+	grid-template-columns: repeat(8, 1fr);
+	gap: 2px;
+}
+.emoji-cell {
+	display: grid;
+	place-items: center;
+	aspect-ratio: 1;
+	padding: 0;
+	border-radius: 12px;
+	font-size: 23px;
+	line-height: 1;
+	transition: scale var(--m3-dur-fast) var(--m3-spring-bouncy), background-color 120ms var(--m3-effects), border-radius var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.emoji-cell:hover {
+	background: var(--m3-state-hover);
+	border-radius: 50%;
+	scale: 1.18;
+}
+.emoji-cell:active {
+	scale: 0.9;
+}
+
+.emoji-empty,
+.emoji-error {
+	border-radius: 16px;
+}
+.sticker-cell {
+	border: 0;
+	border-radius: 18px;
+	background: var(--m3-surface-container-highest);
+	transition: border-radius var(--m3-dur) var(--m3-spring), scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.sticker-cell:hover {
+	border-radius: 26px;
+}
+.sticker-cell:active {
+	scale: 0.94;
+}
+.gif-upload {
+	display: grid;
+	gap: 8px;
+	justify-items: start;
+	padding: 6px;
+}
+
+/* The reaction picker around the panel. */
+.msg-picker {
+	width: 360px;
+	padding: 8px;
+	border: 0;
+	border-radius: 28px;
+	background: var(--m3-surface-container-high);
+	box-shadow: 0 18px 44px color-mix(in srgb, #000 30%, transparent);
+}
+.msg-picker-quick {
+	justify-content: space-between;
+	gap: 2px;
+	margin-bottom: 6px;
+	padding: 2px 2px 8px;
+	border-bottom: 1px solid var(--m3-outline-variant);
+}
+.msg-picker .emoji-panel {
+	width: 100%;
+	padding: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	animation: none;
+}
+.msg-picker .emoji-group-title {
+	background: var(--m3-surface-container-high);
+}
+.reaction-pick {
+	width: 38px;
+	height: 38px;
+	border-radius: 50%;
+	font-size: 22px;
+	transition: scale var(--m3-dur-fast) var(--m3-spring-bouncy), background-color 120ms var(--m3-effects);
+}
+.reaction-pick:hover {
+	scale: 1.22;
+	background: var(--m3-state-hover);
+}
+
+@media (max-width: 520px) {
+	.emoji-panel,
+	.msg-picker {
+		width: calc(100vw - 16px);
+	}
+	.emoji-group-items {
+		grid-template-columns: repeat(8, 1fr);
+	}
+}

@@ -7,7 +7,7 @@ import { isAnimatedMedia, isAudioMedia, isVideoMedia, type MediaEnvelope } from 
 import { formatDate, formatTimeOfDay, type Lang, type StringKey } from "../lib/i18n"
 import { useSettings } from "../state/settings"
 import { PollCard } from "./PollCard"
-import { EmojiPanel } from "./EmojiPanel"
+import { EmojiPanel, frequentEmoji, noteEmojiUsed } from "./EmojiPanel"
 import { IconEmoji, IconReply, IconForward, IconMore, IconFile } from "./Icons"
 import { formatDuration, WAVEFORM_BARS } from "../lib/voice"
 import { renderRichText, stripFormatting } from "../lib/richtext"
@@ -950,13 +950,14 @@ members?: ConversationMember[]
 		const mineReactions = new Set((byMessage.get(message.id) ?? []).filter((r) => r.userId === currentUserId).map((r) => r.emoji))
 		return (
 			<div className="ctx-reactions">
-				{REACTION_SET.slice(0, 7).map((emoji) => (
+				{frequentEmoji(7, REACTION_SET).map((emoji) => (
 					<button
 						key={emoji}
 						type="button"
 						className={"ctx-reaction" + (mineReactions.has(emoji) ? " mine" : "")}
 						onClick={() => {
 							setContextMenu(null)
+							if (!mineReactions.has(emoji)) noteEmojiUsed(emoji)
 							onToggleReaction(message.id, emoji, !mineReactions.has(emoji))
 						}}
 					>
@@ -1144,8 +1145,8 @@ const senderAvatar = sender ? sender.avatar : null
 								{pickerId === message.id ? (createPortal(
 									<div className="msg-picker" style={pickerStyle ?? undefined}>
 										<div className="msg-picker-quick">
-											{REACTION_SET.map((emoji) => (
-												<button key={emoji} className="reaction-pick" onClick={() => { setPickerId(null); onToggleReaction(message.id, emoji, !grouped.some((g) => g.emoji === emoji && g.mine)) }}>{emoji}</button>
+											{frequentEmoji(8, REACTION_SET).map((emoji) => (
+												<button key={emoji} className="reaction-pick" onClick={() => { setPickerId(null); noteEmojiUsed(emoji); onToggleReaction(message.id, emoji, !grouped.some((g) => g.emoji === emoji && g.mine)) }}>{emoji}</button>
 											))}
 										</div>
 										<EmojiPanel full={false} onPickEmoji={(emoji) => { setPickerId(null); onToggleReaction(message.id, emoji, !grouped.some((g) => g.emoji === emoji && g.mine)) }} onClose={() => setPickerId(null)} />
