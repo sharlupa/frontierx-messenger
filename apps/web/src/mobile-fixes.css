@@ -1,0 +1,212 @@
+/* ---------------------------------------------------------------------------
+   Phone / Android WebView / installed PWA fixes.
+   Imported last on purpose: these rules deliberately override earlier ones.
+   --------------------------------------------------------------------------- */
+
+/* 1. Dialogs must never be taller than the visible screen.
+      When a flex item is taller than its centering container it overflows
+      equally in both directions, so the top edge slides off-screen and the
+      panel only looks "pushed down". Capping the height fixes the centering
+      of every dialog at once. */
+.modal-backdrop {
+	height: 100dvh;
+	padding: calc(20px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+		calc(20px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left));
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+.modal {
+	margin: auto;
+	max-height: 100%;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+}
+
+/* vh is the *large* viewport on phones, so calc(100vh - 48px) was still
+   taller than the area the user can actually see. */
+.settings-dialog,
+.member-dialog,
+.friend-dialog,
+.qr-dialog,
+.poll-dialog,
+.account-dialog,
+.saved-dialog,
+.confirm-dialog,
+.cropper-modal {
+	max-height: 100%;
+}
+
+/* 2. Comments panel: a sheet measured against the visible area, not 100vh. */
+.comments-backdrop {
+	padding: 0;
+}
+
+.comments-dialog {
+	height: 100%;
+	max-height: 100%;
+	margin: 0;
+}
+
+.comment-composer {
+	padding-bottom: calc(10px + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 640px) {
+	.comments-dialog {
+		width: 100%;
+		max-width: 100%;
+	}
+}
+
+/* 3. Smooth slide between the chat list and an open chat on phones.
+      Deliberately no animation fill-mode: a retained transform would turn the
+      pane into a containing block and break position: fixed dialogs inside. */
+@media (max-width: 760px) {
+	.app-shell.has-active .main {
+		animation: fx-pane-in-right 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+	}
+
+	.app-shell:not(.has-active) .sidebar {
+		animation: fx-pane-in-left 0.26s cubic-bezier(0.22, 0.61, 0.36, 1);
+	}
+
+	.sidebar-header {
+		padding-top: calc(12px + env(safe-area-inset-top));
+	}
+
+	.thread-header {
+		padding-top: calc(12px + env(safe-area-inset-top));
+	}
+
+	.composer {
+		padding-bottom: calc(10px + env(safe-area-inset-bottom));
+	}
+}
+
+@keyframes fx-pane-in-right {
+	from {
+		transform: translateX(14%);
+		opacity: 0.35;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+@keyframes fx-pane-in-left {
+	from {
+		transform: translateX(-14%);
+		opacity: 0.35;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.app-shell.has-active .main,
+	.app-shell:not(.has-active) .sidebar {
+		animation: none;
+	}
+}
+
+/* 4. Invite landing page: channel icon, name under it, web-or-app choice. */
+.invite-card {
+	max-width: 400px;
+	text-align: center;
+}
+
+.invite-avatar {
+	width: 96px;
+	height: 96px;
+	margin: 4px auto 14px;
+	border-radius: 50%;
+	overflow: hidden;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--bg-elevated);
+	border: 1px solid var(--border);
+	font-size: 38px;
+	font-weight: 700;
+	color: var(--text-strong);
+}
+
+.invite-avatar img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+
+.invite-title {
+	font-size: 21px;
+	font-weight: 700;
+	color: var(--text-strong);
+	margin-bottom: 4px;
+	word-break: break-word;
+}
+
+.invite-kind {
+	margin: 0 0 20px;
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+.invite-actions {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.invite-actions .button {
+	width: 100%;
+	justify-content: center;
+}
+
+.invite-hint {
+	margin: 16px 0 0;
+	font-size: 12px;
+	line-height: 1.45;
+	color: var(--text-muted);
+}
+
+/* 5. True vertical centering.
+   The status bar and the navigation bar are never the same height, so using
+   each inset on its own side makes the centering box itself lopsided and the
+   dialog looks shifted up or down. Use one value on both sides. */
+.modal-backdrop {
+	padding-top: calc(20px + max(env(safe-area-inset-top), env(safe-area-inset-bottom)));
+	padding-bottom: calc(20px + max(env(safe-area-inset-top), env(safe-area-inset-bottom)));
+	padding-left: calc(16px + env(safe-area-inset-left));
+	padding-right: calc(16px + env(safe-area-inset-right));
+}
+
+/* The comments sheet is edge-to-edge, not a centered box. Re-assert it after
+   the rule above, which has the same specificity. */
+.comments-backdrop {
+	padding: 0;
+}
+
+/* Login, registration, the loading screen and the invite page live outside
+   .modal-backdrop. min-height: 100% measures the document, which on phones is
+   taller than the visible area, so the card sat below the optical center. */
+.auth-shell {
+	height: 100dvh;
+	min-height: 100dvh;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	padding-top: calc(24px + max(env(safe-area-inset-top), env(safe-area-inset-bottom)));
+	padding-bottom: calc(24px + max(env(safe-area-inset-top), env(safe-area-inset-bottom)));
+	padding-left: calc(16px + env(safe-area-inset-left));
+	padding-right: calc(16px + env(safe-area-inset-right));
+}
+
+/* Auto margins keep the card centered while leaving the top reachable when the
+   form is taller than the screen. */
+.auth-card {
+	margin: auto;
+}

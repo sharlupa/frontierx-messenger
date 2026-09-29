@@ -1,0 +1,34 @@
+node_modules/
+dist/
+build/
+release/
+coverage/
+*.log
+*.tsbuildinfo
+.DS_Store
+.idea/
+.vscode/
+
+# data and secrets never belong here
+*.db
+*.db-*
+*.sqlite*
+frontierx-blobs/
+.env
+.env.*
+!.env.example
+secrets/
+
+# Android
+.gradle/
+local.properties
+apps/android/keystore.properties
+apps/android/app/google-services.json
+*.jks
+*.keystore
+*.apk
+*.aab
+
+# generated
+apps/web/public/sdk/
+apps/site/dist/

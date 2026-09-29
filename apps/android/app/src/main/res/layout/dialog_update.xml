@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+	android:layout_width="match_parent"
+	android:layout_height="wrap_content"
+	android:background="@drawable/fx_dialog_card"
+	android:orientation="vertical"
+	android:paddingLeft="24dp"
+	android:paddingRight="24dp"
+	android:paddingTop="22dp"
+	android:paddingBottom="16dp">
+
+	<TextView
+		android:id="@+id/update_title"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:text="@string/update_available_title"
+		android:textColor="@color/fx_text"
+		android:textSize="19sp"
+		android:textStyle="bold" />
+
+	<TextView
+		android:id="@+id/update_versions"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="10dp"
+		android:textColor="@color/fx_muted"
+		android:textSize="14sp" />
+
+	<TextView
+		android:id="@+id/update_size"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="3dp"
+		android:textColor="@color/fx_muted"
+		android:textSize="14sp" />
+
+	<TextView
+		android:id="@+id/update_notes_title"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="18dp"
+		android:text="@string/update_notes_title"
+		android:textColor="@color/fx_text"
+		android:textSize="14sp"
+		android:textStyle="bold" />
+
+	<TextView
+		android:id="@+id/update_notes"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="6dp"
+		android:ellipsize="end"
+		android:lineSpacingExtra="3dp"
+		android:maxLines="10"
+		android:textColor="@color/fx_muted"
+		android:textSize="14sp" />
+
+	<ProgressBar
+		android:id="@+id/update_progress"
+		style="?android:attr/progressBarStyleHorizontal"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="20dp"
+		android:max="100"
+		android:visibility="gone" />
+
+	<TextView
+		android:id="@+id/update_status"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="6dp"
+		android:textColor="@color/fx_muted"
+		android:textSize="13sp"
+		android:visibility="gone" />
+
+	<androidx.appcompat.widget.AppCompatButton
+		android:id="@+id/update_install"
+		style="@style/Widget.AppCompat.Button.Colored"
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="20dp"
+		android:text="@string/update_install"
+		android:textAllCaps="false"
+		android:textSize="15sp" />
+
+	<LinearLayout
+		android:layout_width="match_parent"
+		android:layout_height="wrap_content"
+		android:layout_marginTop="4dp"
+		android:orientation="horizontal">
+
+		<androidx.appcompat.widget.AppCompatButton
+			android:id="@+id/update_later"
+			style="@style/Widget.AppCompat.Button.Borderless"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:text="@string/update_later"
+			android:textAllCaps="false"
+			android:textColor="@color/fx_muted"
+			android:textSize="14sp" />
+
+		<androidx.appcompat.widget.AppCompatButton
+			android:id="@+id/update_skip"
+			style="@style/Widget.AppCompat.Button.Borderless"
+			android:layout_width="0dp"
+			android:layout_height="wrap_content"
+			android:layout_weight="1"
+			android:text="@string/update_skip"
+			android:textAllCaps="false"
+			android:textColor="@color/fx_muted"
+			android:textSize="14sp" />
+	</LinearLayout>
+</LinearLayout>

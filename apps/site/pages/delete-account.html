@@ -1,0 +1,66 @@
+<!-- page: delete | da.title | Удаление аккаунта — FrontierX | Удалите аккаунт FrontierX и все связанные данные без входа в приложение. -->
+<section class="page-hero">
+	<div class="morph" data-morph="pentagon cookie6 gem" data-speed="1200" data-hold="1700" aria-hidden="true"></div>
+	<div class="wrap">
+		<span class="eyebrow" data-reveal data-i18n="da.eyebrow">Аккаунт</span>
+		<h1 class="headline" data-reveal data-i18n-html="da.h1">Удаление аккаунта</h1>
+		<p class="lede" data-reveal data-i18n-html="da.lead">Здесь можно удалить свой аккаунт FrontierX самостоятельно — вход в приложение не нужен. Введите логин и пароль: аккаунт, сообщения, файлы, ключи и сессии будут удалены сразу и безвозвратно.</p>
+	</div>
+</section>
+
+<section class="wrap">
+	<div class="da-card" data-reveal>
+		<form class="da-form" id="da-form" autocomplete="off">
+				<label class="da-field">
+					<span data-i18n-html="da.user">Логин</span>
+					<input class="da-input" id="da-user" type="text" name="fx-username" autocomplete="off" />
+				</label>
+				<label class="da-field">
+					<span data-i18n-html="da.pass">Пароль</span>
+					<input class="da-input" id="da-pass" type="password" name="fx-password" autocomplete="off" />
+				</label>
+				<label class="da-check">
+					<input id="da-ok" type="checkbox" />
+					<span data-i18n-html="da.confirm">Я понимаю, что удаление необратимо и восстановить данные будет нельзя.</span>
+				</label>
+				<button class="da-btn" id="da-btn" type="submit" data-i18n-html="da.btn">Удалить аккаунт</button>
+				<p class="da-msg" id="da-msg"></p>
+			</form>
+		<p class="da-note" data-i18n-html="da.note">Что именно удаляется и что остаётся — описано в разделе 15 <a href="/privacy">политики конфиденциальности</a>.</p>
+	</div>
+</section>
+<script>
+	(function () {
+		var form = document.getElementById("da-form")
+		if (!form) return
+		var msg = document.getElementById("da-msg")
+		var btn = document.getElementById("da-btn")
+		var M = {
+			ru: { need: "Заполните логин и пароль.", check: "Отметьте подтверждение.", busy: "Удаляем…", ok: "Аккаунт удалён. Данные стёрты с сервера.", bad: "Неверный логин или пароль.", many: "Слишком много попыток. Попробуйте позже.", err: "Не удалось выполнить запрос. Попробуйте позже." },
+			en: { need: "Enter your username and password.", check: "Please confirm that you understand.", busy: "Deleting…", ok: "The account has been deleted. The data is erased from the server.", bad: "Wrong username or password.", many: "Too many attempts. Try again later.", err: "The request failed. Try again later." }
+		}
+		function t(k) {
+			var lang = "ru"
+			try { lang = localStorage.getItem("frontierx.lang") || "ru" } catch (e) {}
+			return (M[lang] || M.ru)[k]
+		}
+		form.addEventListener("submit", function (e) {
+			e.preventDefault()
+			var u = document.getElementById("da-user").value.trim()
+			var p = document.getElementById("da-pass").value
+			if (!u || !p) { msg.textContent = t("need"); return }
+			if (!document.getElementById("da-ok").checked) { msg.textContent = t("check"); return }
+			btn.disabled = true
+			msg.textContent = t("busy")
+			fetch("/api/account/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: u, password: p }) })
+				.then(function (r) {
+					if (r.status === 200) { msg.textContent = t("ok"); form.reset(); return }
+					if (r.status === 401) { msg.textContent = t("bad"); return }
+					if (r.status === 429) { msg.textContent = t("many"); return }
+					msg.textContent = t("err")
+				})
+				.catch(function () { msg.textContent = t("err") })
+				.then(function () { btn.disabled = false })
+		})
+	})()
+	</script>

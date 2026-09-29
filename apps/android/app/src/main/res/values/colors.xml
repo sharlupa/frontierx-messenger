@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="fx_background">#0E1621</color>
+    <color name="fx_bars">#17212B</color>
+    <color name="fx_text">#FFFFFF</color>
+    <color name="fx_muted">#8A9AAE</color>
+    <color name="fx_accent">#005CFF</color>
+    <color name="ic_launcher_background">#005CFF</color>
+</resources>

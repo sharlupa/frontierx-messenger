@@ -1,0 +1,5 @@
+"NSMicrophoneUsageDescription" = "FrontierX использует микрофон для звонков и голосовых сообщений.";
+"NSCameraUsageDescription" = "FrontierX использует камеру для видеозвонков и чтобы сделать фото для отправки.";
+"NSPhotoLibraryUsageDescription" = "FrontierX открывает фото и видео, которые вы выбрали для отправки.";
+"NSPhotoLibraryAddUsageDescription" = "FrontierX сохраняет в «Фото» то, что вы решили сохранить.";
+"NSLocationWhenInUseUsageDescription" = "FrontierX определяет местоположение, только когда вы отправляете его в чат.";

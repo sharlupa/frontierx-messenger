@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+		<meta name="theme-color" content="#17212b" />
+		<meta name="description" content="FrontierX secure messenger" />
+		<meta name="color-scheme" content="dark light" />
+		<meta name="format-detection" content="telephone=no" />
+		<!-- iPhone, iPad and Mac: installable from Safari's share menu, full screen, own icon -->
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-title" content="FrontierX" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<link rel="icon" href="/icons/icon-192.png" type="image/png" sizes="192x192" />
+		<link rel="mask-icon" href="/favicon.svg" color="#005cff" />
+		<title>FrontierX</title>
+		<script>
+			(function () {
+				try {
+					var theme = localStorage.getItem("frontierx.theme")
+					var known = ["light", "dark", "ocean", "forest", "sunset", "midnight", "telegram", "nord"]
+					if (known.indexOf(theme) < 0) theme = "dark"
+					document.documentElement.dataset.theme = theme
+					var lang = localStorage.getItem("frontierx.lang")
+					if (lang !== "en" && lang !== "ru") lang = (navigator.language || "en").toLowerCase().indexOf("ru") === 0 ? "ru" : "en"
+					document.documentElement.setAttribute("lang", lang)
+				} catch (e) {}
+			})()
+		</script>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module" src="/src/main.tsx"></script>
+	</body>
+</html>

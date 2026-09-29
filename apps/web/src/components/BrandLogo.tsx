@@ -1,0 +1,41 @@
+import { useId } from "react"
+
+export function BrandLogo({ size = 28 }: { size?: number }) {
+  const uid = useId().replace(/:/g, "")
+  const clipId = "bl-clip-" + uid
+  const maskId = "bl-mask-" + uid
+  const gradId = "bl-grad-" + uid
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 66 66"
+      fill="none"
+      role="img"
+      aria-label="FrontierX"
+      className="brand-logo"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <g clipPath={`url(#${clipId})`}>
+        <mask id={maskId} maskUnits="userSpaceOnUse" x="0" y="0" width="66" height="66">
+          <path d="M66 33C66 14.7746 51.2254 0 33 0C14.7746 0 0 14.7746 0 33C0 51.2254 14.7746 66 33 66C51.2254 66 66 51.2254 66 33Z" fill="white" />
+        </mask>
+        <g mask={`url(#${maskId})`}>
+          <path d="M66 33C66 14.7746 51.2254 0 33 0C14.7746 0 0 14.7746 0 33C0 51.2254 14.7746 66 33 66C51.2254 66 66 51.2254 66 33Z" fill="#005CFF" />
+          <path
+            d="M25.7426 40.2165C28.2977 42.7717 30.6917 47.0833 32.5104 50.9328C33.7312 53.5165 37.7411 53.417 38.6453 50.7062L48.0108 22.6294C48.9673 19.762 46.2384 17.034 43.3713 17.9913L15.33 27.3542C12.6167 28.2601 12.5214 32.2793 15.1085 33.4998C18.9309 35.3031 23.2004 37.6744 25.7426 40.2165Z" fill={`url(#${gradId})`} fillOpacity="0.9" />
+          <path d="M14.4606 33.0957C14.6537 33.2513 14.8704 33.3874 15.1091 33.5C18.9314 35.3033 23.2008 37.6748 25.7429 40.2168C28.2978 42.772 30.6918 47.0833 32.5104 50.9326C32.6838 51.2994 32.9154 51.6103 33.1843 51.8691L26.9606 68.9697C24.8541 74.7562 17.2736 76.0932 13.3151 71.376L-5.61163 48.8193C-9.57011 44.1017 -6.93719 36.8682 -0.872373 35.7988L14.4606 33.0957Z" fill="#FA1055" />
+        </g>
+      </g>
+      <defs>
+        <linearGradient id={gradId} x1="28.6667" y1="15.6667" x2="28.6667" y2="59.0107" gradientUnits="userSpaceOnUse">
+          <stop stopColor="white" />
+          <stop offset="1" stopColor="white" stopOpacity="0.6" />
+        </linearGradient>
+        <clipPath id={clipId}>
+          <rect width="66" height="66" fill="white" />
+        </clipPath>
+      </defs>
+    </svg>
+  )
+}

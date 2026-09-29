@@ -1,0 +1,102 @@
+{
+  "name": "@frontierx/desktop",
+  "private": true,
+  "version": "0.2.1",
+  "description": "FrontierX desktop app for Linux, Windows and macOS (Electron shell around the web client).",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --linux AppImage deb",
+    "pack": "electron-builder --dir",
+    "dist:win": "electron-builder --win nsis portable --x64 --config.npmRebuild=false",
+    "dist:mac": "electron-builder --mac dmg zip --x64 --arm64"
+  },
+  "devDependencies": {
+    "electron": "31.7.7",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.frontierx.desktop",
+    "productName": "FrontierX",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "*.cjs",
+      "renderer/**"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network",
+      "executableName": "frontierx",
+      "maintainer": "FrontierX <noreply@frontierx.local>"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "FrontierX"
+    },
+    "electronVersion": "31.7.7",
+    "deb": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "category": "public.app-category.social-networking",
+      "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "FrontierX uses the microphone for calls and voice messages.",
+        "NSCameraUsageDescription": "FrontierX uses the camera for video calls.",
+        "NSLocationWhenInUseUsageDescription": "FrontierX uses your location only when you share it in a chat.",
+        "LSApplicationCategoryType": "public.app-category.social-networking"
+      }
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    }
+  },
+  "author": "FrontierX",
+  "homepage": "https://frontierx.zkito.fun",
+  "license": "GPL-3.0-or-later"
+}

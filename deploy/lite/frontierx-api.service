@@ -1,0 +1,41 @@
+[Unit]
+Description=FrontierX API and WebSocket service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=frontierx
+Group=frontierx
+WorkingDirectory=/srv/frontierx/current
+EnvironmentFile=/etc/frontierx/api.env
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_OPTIONS=--max-old-space-size=512
+ExecStart=/usr/bin/env node /srv/frontierx/current/apps/api/dist/apps/api/src/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=30
+
+# Low-memory and least-privilege guardrails for the initial VPS profile.
+UMask=0077
+MemoryMax=850M
+TasksMax=128
+LimitNOFILE=4096
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/frontierx
+
+[Install]
+WantedBy=multi-user.target

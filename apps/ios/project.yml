@@ -1,0 +1,59 @@
+# XcodeGen spec for the FrontierX iPhone and iPad app.
+# On a Mac:  brew install xcodegen && xcodegen generate && open FrontierX.xcodeproj
+name: FrontierX
+options:
+  bundleIdPrefix: com.frontierx
+  deploymentTarget:
+    iOS: "15.0"
+  developmentLanguage: ru
+  createIntermediateGroups: true
+settings:
+  base:
+    MARKETING_VERSION: "0.3.0"
+    CURRENT_PROJECT_VERSION: "1"
+    SWIFT_VERSION: "5.9"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    # Your Apple Developer Team ID (Xcode → Settings → Accounts), or set it in
+    # Signing & Capabilities after generating the project.
+    DEVELOPMENT_TEAM: ""
+targets:
+  FrontierX:
+    type: application
+    platform: iOS
+    sources:
+      - path: FrontierX
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.frontierx.ios
+        PRODUCT_NAME: FrontierX
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_BITCODE: NO
+    info:
+      path: FrontierX/Info.plist
+      properties:
+        CFBundleDisplayName: FrontierX
+        CFBundleName: FrontierX
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: ru
+        CFBundleLocalizations: [ru, en]
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UIStatusBarStyle: UIStatusBarStyleLightContent
+        UIViewControllerBasedStatusBarAppearance: true
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSMicrophoneUsageDescription: FrontierX использует микрофон для звонков и голосовых сообщений.
+        NSCameraUsageDescription: FrontierX использует камеру для видеозвонков и чтобы сделать фото для отправки.
+        NSPhotoLibraryUsageDescription: FrontierX открывает фото и видео, которые вы выбрали для отправки.
+        NSPhotoLibraryAddUsageDescription: FrontierX сохраняет в «Фото» то, что вы решили сохранить.
+        NSLocationWhenInUseUsageDescription: FrontierX определяет местоположение, только когда вы отправляете его в чат.

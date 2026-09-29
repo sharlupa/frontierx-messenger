@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">FrontierX</string>
+    <string name="setup_title">Подключение к серверу</string>
+    <string name="setup_hint">Укажите адрес сервера FrontierX: адрес в локальной сети или ссылку туннеля.</string>
+    <string name="setup_placeholder">http://192.168.1.10:8080</string>
+    <string name="setup_connect">Подключиться</string>
+    <string name="setup_invalid">Неверный адрес. Проверьте и попробуйте снова.</string>
+    <string name="connect_failed">Не удалось подключиться к серверу. Проверьте адрес.</string>
+    <string name="location_denied">Без доступа к геопозиции нельзя отправить своё местоположение.</string>
+    <string name="mic_denied">Без доступа к микрофону звонки работать не будут.</string>
+    <string name="file_pick_failed">Не удалось открыть выбор файлов.</string>
+    <string name="download_started">Скачивание началось...</string>
+    <string name="download_saved">Сохранено в Загрузки: %1$s</string>
+    <string name="download_failed">Не удалось сохранить файл.</string>
+
+    <string name="close">Закрыть</string>
+    <string name="cancel">Отмена</string>
+
+    <string name="channel_messages">Сообщения</string>
+    <string name="channel_messages_desc">Уведомления о новых сообщениях</string>
+    <string name="channel_calls">Звонки</string>
+    <string name="channel_calls_desc">Уведомления о входящих звонках</string>
+    <string name="channel_updates">Обновления</string>
+    <string name="channel_updates_desc">Загрузка и установка новых версий</string>
+
+    <string name="update_available_title">Доступно обновление</string>
+    <string name="update_available_body">Вышла версия %1$s. Скачать и установить сейчас?</string>
+    <string name="update_install">Обновить</string>
+    <string name="update_later">Позже</string>
+    <string name="update_skip">Пропустить версию</string>
+    <string name="update_downloading">Загрузка обновления</string>
+    <string name="update_failed_title">Не удалось обновить</string>
+    <string name="update_failed_body">Не удалось загрузить обновление. Попробуйте позже.</string>
+    <string name="update_checksum_failed">Файл обновления повреждён.</string>
+    <string name="update_permission_title">Нужно разрешение</string>
+    <string name="update_permission_body">Чтобы установить обновление, разрешите установку приложений из этого источника.</string>
+    <string name="update_permission_open">Открыть настройки</string>
+
+    <string name="push_no_distributor">Уведомления доставляются встроенным каналом приложения.</string>
+    <string name="push_registration_failed">Не удалось включить фоновые уведомления.</string>
+    <string name="update_checking">Проверка обновлений</string>
+    <string name="update_up_to_date">Установлена последняя версия</string>
+    <string name="channel_service">Фоновое соединение</string>
+    <string name="channel_service_desc">Тихое уведомление, пока приложение получает сообщения в фоне.</string>
+    <string name="push_service_title">FrontierX работает в фоне</string>
+    <string name="push_service_text">Сообщения и звонки доставляются без сторонних приложений</string>
+    <string name="push_message_title">Новое сообщение</string>
+    <string name="push_message_body">Откройте приложение, чтобы прочитать</string>
+    <string name="push_call_title">Входящий звонок</string>
+    <string name="push_call_body">Нажмите, чтобы ответить</string>
+    <string name="push_test_body">Уведомления работают</string>
+	<string name="update_versions_format">Установлена версия %1$s. Доступна версия %2$s.</string>
+	<string name="update_size_format">Размер загрузки: %1$s</string>
+	<string name="update_progress_format">Загрузка: %1$d%%</string>
+	<string name="update_notes_title">Что нового</string>
+	<string name="update_ready">Загрузка завершена. Открываю установщик.</string>
+	<string name="update_retry">Повторить</string>
+</resources>

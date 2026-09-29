@@ -1,0 +1,26 @@
+# Replace frontierx.example.com with a real DNS name before use. Caddy can then
+# obtain and renew TLS automatically. The API remains loopback-only.
+frontierx.example.com {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), geolocation=(self), microphone=(self)"
+	}
+
+	@api path /api/* /ws
+	handle @api {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	@immutable_assets path /assets/* /workbox-*.js
+	header @immutable_assets Cache-Control "public, max-age=31536000, immutable"
+
+	handle {
+		root * /srv/frontierx/current/apps/web/dist
+		try_files {path} /index.html
+		file_server
+	}
+}

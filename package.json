@@ -1,0 +1,39 @@
+{
+  "name": "frontierx",
+  "private": true,
+  "version": "0.2.0",
+  "description": "FrontierX - secure, local-first messenger (independent, Telegram-class).",
+  "license": "GPL-3.0-or-later",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "android": "cd apps/android && gradle assembleDebug",
+    "android:install": "cd apps/android && gradle installDebug",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "tsx --test",
+    "test:workspaces": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:api": "npm -w @frontierx/api run dev",
+    "dev:web": "npm -w @frontierx/web run dev",
+    "package:lean": "node scripts/package-lean-runtime.mjs",
+    "desktop": "npm -w @frontierx/desktop run start",
+    "desktop:dist": "npm -w @frontierx/desktop run dist",
+    "desktop:dist:win": "npm -w @frontierx/desktop run dist:win"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "dependencies": {
+    "7zip-bin": "^5.2.0",
+    "app-builder-bin": "^4.2.0"
+  }
+}

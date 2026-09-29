@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "../..",
+    "baseUrl": ".",
+    "paths": {
+      "@frontierx/shared": ["../../packages/shared/src/index.ts"],
+      "@frontierx/protocol": ["../../packages/protocol/src/index.ts"],
+      "@frontierx/crypto": ["../../packages/crypto/src/index.ts"],
+      "@frontierx/domain": ["../../packages/domain/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

@@ -1,0 +1,1002 @@
+/* ==========================================================================
+   Material 3 Expressive layer.
+   Loaded after every other stylesheet. It only reshapes and animates: colours
+   still come from the active theme (and the user's accent), so all eight
+   themes keep working. Spring curves are sampled damped springs, matching the
+   M3 Expressive motion scheme (fast spatial, default spatial, bouncy).
+   ========================================================================== */
+
+:root {
+	--m3-spring-fast: linear(0, 0.054, 0.185, 0.352, 0.527, 0.69, 0.827, 0.934, 1.011, 1.06, 1.086, 1.095, 1.091, 1.079, 1.063, 1.047, 1.031, 1.018, 1.007, 1, 0.995, 0.992, 0.991, 0.991, 0.992, 0.994, 0.995, 0.997, 1);
+	--m3-spring: linear(0, 0.05, 0.166, 0.31, 0.455, 0.589, 0.703, 0.796, 0.868, 0.921, 0.959, 0.984, 1, 1.01, 1.014, 1.015, 1.014, 1.013, 1.011, 1.008, 1.006, 1.005, 1.003, 1.002, 1.001, 1.001, 1);
+	--m3-spring-bouncy: linear(0, 0.062, 0.218, 0.424, 0.643, 0.845, 1.011, 1.131, 1.203, 1.232, 1.226, 1.195, 1.149, 1.098, 1.049, 1.008, 0.976, 0.956, 0.947, 0.946, 0.952, 0.962, 0.974, 0.985, 0.996, 1.004, 1.009, 1.012, 1.013, 1.012, 1.01, 1.007, 1.004, 1.002, 1, 0.998, 1);
+	--m3-effects: cubic-bezier(0.31, 0.94, 0.34, 1);
+	--m3-dur-fast: 350ms;
+	--m3-dur: 500ms;
+	--m3-dur-bouncy: 600ms;
+
+	--m3-shape-xs: 8px;
+	--m3-shape-s: 12px;
+	--m3-shape-m: 16px;
+	--m3-shape-l: 20px;
+	--m3-shape-xl: 28px;
+	--m3-shape-full: 999px;
+
+	/* Tonal roles derived from the theme accent. */
+	--m3-primary-container: color-mix(in srgb, var(--accent) 26%, var(--bg-panel));
+	--m3-on-primary-container: color-mix(in srgb, var(--accent) 30%, var(--text-strong));
+	--m3-surface-container: color-mix(in srgb, var(--accent) 5%, var(--bg-elevated));
+	--m3-surface-container-high: color-mix(in srgb, var(--accent) 9%, var(--bg-elevated));
+	--m3-track: color-mix(in srgb, var(--accent) 28%, transparent);
+	--m3-state-hover: color-mix(in srgb, var(--text) 8%, transparent);
+	--m3-state-press: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+/* --- Shared keyframes -------------------------------------------------------- */
+
+@keyframes m3-pop-in {
+	from { opacity: 0; transform: scale(0.6); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes m3-fade-in {
+	from { opacity: 0; }
+	to { opacity: 1; }
+}
+@keyframes m3-rise-in {
+	from { opacity: 0; transform: translateY(18px) scale(0.96); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes m3-dialog-in {
+	from { opacity: 0; transform: translateY(28px) scale(0.86); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes m3-menu-in {
+	from { opacity: 0; transform: scale(0.82); }
+	to { opacity: 1; transform: none; }
+}
+@keyframes m3-bubble-in {
+	from { opacity: 0; transform: translateY(14px) scale(0.72); }
+	to { opacity: 1; transform: none; }
+}
+/* Two identical keyframes so switching classes restarts the squash. */
+@keyframes m3-squash-a {
+	0% { transform: scale(1); }
+	35% { transform: scale(0.86, 0.9); }
+	100% { transform: scale(1); }
+}
+@keyframes m3-squash-b {
+	0% { transform: scale(1); }
+	35% { transform: scale(0.86, 0.9); }
+	100% { transform: scale(1); }
+}
+/* Recording blob: the dot keeps changing shape while it breathes. */
+@keyframes m3-blob {
+	0% { border-radius: 50%; transform: scale(1) rotate(0deg); }
+	25% { border-radius: 42% 58% 55% 45% / 48% 42% 58% 52%; transform: scale(1.18) rotate(40deg); }
+	50% { border-radius: 30%; transform: scale(0.92) rotate(90deg); }
+	75% { border-radius: 58% 42% 40% 60% / 55% 60% 40% 45%; transform: scale(1.14) rotate(140deg); }
+	100% { border-radius: 50%; transform: scale(1) rotate(180deg); }
+}
+@keyframes m3-typing {
+	0%, 60%, 100% { transform: translateY(0) scale(0.8); opacity: 0.45; }
+	30% { transform: translateY(-4px) scale(1); opacity: 1; }
+}
+@keyframes m3-wave-slide {
+	to { transform: translateX(var(--wave-shift, -22px)); }
+}
+@keyframes m3-sweep {
+	from { transform: translateX(-45%); }
+	to { transform: translateX(105%); }
+}
+
+/* --- Loading indicator and wavy progress ------------------------------------ */
+
+.m3-loader {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--accent);
+	vertical-align: middle;
+}
+.m3-loader.contained {
+	border-radius: 50%;
+	background: var(--m3-primary-container);
+}
+.m3-loader svg {
+	display: block;
+	overflow: visible;
+}
+.m3-loading-block {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 14px;
+	padding: 32px 16px;
+	color: var(--text-muted);
+	font-size: 13px;
+	animation: m3-fade-in 240ms var(--m3-effects) both;
+}
+.auth-shell > .m3-loading-block {
+	padding: 0;
+}
+.m3-loading-label {
+	letter-spacing: 0.01em;
+}
+
+.m3-wavy {
+	display: block;
+	width: 100%;
+	color: var(--accent);
+	overflow: hidden;
+}
+.m3-wavy svg {
+	display: block;
+}
+.m3-wavy-wave {
+	animation: m3-wave-slide 900ms linear infinite;
+}
+.m3-wavy-track {
+	stroke: var(--m3-track);
+}
+.m3-wavy-stop {
+	fill: currentColor;
+}
+.m3-wavy-clip {
+	transition: width 280ms var(--m3-effects);
+}
+.m3-wavy.indeterminate .m3-wavy-sweep {
+	animation: m3-sweep 1500ms cubic-bezier(0.45, 0, 0.3, 1) infinite;
+}
+
+.m3-wavy-circle {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--accent);
+}
+.m3-wavy-circle svg {
+	display: block;
+}
+.m3-wavy-circle .m3-wavy-track {
+	stroke: var(--m3-track);
+}
+.m3-wavy-circle-label {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 12px;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+}
+
+/* Indicators follow the surface they sit on: the accent-filled play button,
+   the dark overlay on a video poster, or your own message bubble. */
+.voice-play .m3-wavy-circle {
+	color: var(--on-accent);
+}
+.voice-play .m3-wavy-track {
+	stroke: color-mix(in srgb, var(--on-accent) 32%, transparent);
+}
+.video-progress .m3-wavy-circle {
+	color: #ffffff;
+}
+.video-progress .m3-wavy-track {
+	stroke: rgba(255, 255, 255, 0.32);
+}
+.bubble.mine .m3-wavy {
+	color: var(--bubble-out-text);
+}
+.bubble.mine .m3-wavy-track {
+	stroke: color-mix(in srgb, var(--bubble-out-text) 32%, transparent);
+}
+
+.upload-wavy {
+	margin-top: 6px;
+}
+.video-progress {
+	width: 64px;
+	height: 64px;
+	background: rgba(0, 0, 0, 0.5);
+}
+.voice-play .m3-wavy-circle {
+	margin: -2px;
+}
+.media-loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 96px;
+}
+.viewer-loading {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	width: min(320px, 70vw);
+	opacity: 1;
+}
+.viewer-loading .m3-wavy {
+	color: #ffffff;
+}
+.viewer-loading .m3-wavy-track {
+	stroke: rgba(255, 255, 255, 0.3);
+}
+.load-older .button,
+.gallery-dialog .button {
+	gap: 8px;
+}
+
+/* --- Buttons: pill at rest, squarer while pressed ---------------------------- */
+
+.button {
+	border-radius: var(--m3-shape-full);
+	transition:
+		border-radius var(--m3-dur-fast) var(--m3-spring-fast),
+		transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast),
+		background-color 200ms var(--m3-effects),
+		border-color 200ms var(--m3-effects),
+		box-shadow 200ms var(--m3-effects),
+		color 200ms var(--m3-effects),
+		opacity 200ms var(--m3-effects);
+}
+.button:not(:disabled):hover {
+	transform: none;
+}
+.button:not(:disabled):active {
+	border-radius: var(--m3-shape-s);
+	scale: 0.96;
+	transition-duration: 120ms;
+}
+.button.ghost:not(:disabled):hover {
+	background: var(--m3-state-hover);
+}
+.button.primary:not(:disabled):hover {
+	box-shadow: 0 6px 18px var(--accent-soft);
+}
+
+/* Size changes use the independent `scale` property, which composes with an
+   element's own transform instead of replacing it: the video play button is
+   centred with translate(-50%, -50%) and must grow in place. The older
+   stylesheets pressed buttons with transform; those are switched off here so
+   the two effects never stack. */
+.button:not(:disabled):active,
+.composer-icon-btn:active,
+.composer-send:active,
+.msg-act:active,
+.settings-seg-btn:not(.active):active,
+.seg-btn:active,
+.reaction:active,
+.reaction-pick:active {
+	transform: none;
+}
+
+/* The "New chat" button is an extended FAB: a large rounded square that
+   rounds off on hover and tightens under the finger. */
+.new-conv-btn {
+	min-height: 52px;
+	border-radius: var(--m3-shape-m);
+	font-size: 15px;
+	letter-spacing: 0.01em;
+}
+.new-conv-btn:not(:disabled):hover {
+	border-radius: var(--m3-shape-xl);
+}
+.new-conv-btn:not(:disabled):active {
+	border-radius: var(--m3-shape-s);
+	scale: 0.97;
+}
+
+.composer-icon-btn,
+.msg-act,
+.sidebar-tool {
+	transition:
+		border-radius var(--m3-dur-fast) var(--m3-spring-fast),
+		transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast),
+		background-color 200ms var(--m3-effects),
+		color 200ms var(--m3-effects);
+}
+.composer-icon-btn:not(:disabled):active,
+.msg-act:active {
+	scale: 0.86;
+	transition-duration: 110ms;
+}
+.composer-icon-btn.active {
+	border-radius: var(--m3-shape-s);
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+}
+
+/* --- Composer action: microphone <-> send ------------------------------------ */
+
+.composer-send {
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	transition:
+		border-radius var(--m3-dur) var(--m3-spring),
+		transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast),
+		background-color 200ms var(--m3-effects),
+		box-shadow 200ms var(--m3-effects),
+		opacity 200ms var(--m3-effects);
+}
+.composer-send:not(:disabled):hover {
+	border-radius: var(--m3-shape-m);
+}
+.composer-send:not(:disabled):active {
+	border-radius: var(--m3-shape-s);
+	scale: 0.9;
+	transition-duration: 110ms;
+}
+/* Send is a rounded square, the microphone a circle: switching modes morphs
+   the container while the icon flips over like a card. */
+.composer-action.is-send {
+	border-radius: var(--m3-shape-m);
+	animation: m3-squash-a 420ms var(--m3-spring) both;
+}
+.composer-action.is-mic {
+	animation: m3-squash-b 420ms var(--m3-spring) both;
+}
+.composer-action:disabled {
+	animation: none;
+}
+/* The flip runs as two half turns: the current icon turns edge-on, then the
+   next one turns in from the other edge. No 3D stacking context is needed,
+   which keeps it identical in Chromium, Firefox and WebKit. */
+.flip-card {
+	display: grid;
+	width: 24px;
+	height: 24px;
+	perspective: 120px;
+}
+.flip-face {
+	grid-area: 1 / 1;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition:
+		transform 240ms cubic-bezier(0.3, 0, 0.8, 0.15),
+		opacity 1ms linear 240ms;
+}
+.flip-back,
+.composer-action.is-send .flip-front {
+	transform: rotateY(90deg) scale(0.7);
+	opacity: 0;
+}
+.composer-action.is-send .flip-back,
+.flip-front {
+	transform: none;
+	opacity: 1;
+}
+/* The incoming face waits for the outgoing half turn, then springs in. */
+.composer-action.is-send .flip-back,
+.composer-action.is-mic .flip-front {
+	transition:
+		transform 520ms var(--m3-spring-bouncy) 240ms,
+		opacity 1ms linear 240ms;
+}
+.composer-action.is-mic .flip-back {
+	transform: rotateY(-90deg) scale(0.7);
+}
+
+.composer-input {
+	transition: border-radius var(--m3-dur) var(--m3-spring), box-shadow 200ms var(--m3-effects), background-color 200ms var(--m3-effects);
+}
+.composer-input:focus {
+	box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+/* Light themes paint the input and the panel the same white; a tonal fill
+   keeps the field visible. */
+:root[data-theme="light"] .composer-input,
+:root[data-theme="nord"] .composer-input {
+	background: var(--m3-surface-container-high);
+}
+
+/* Phone layout: the chat and the list slide in on the default spring. */
+.app-shell.has-active .main,
+.app-shell:not(.has-active) .sidebar {
+	animation-duration: var(--m3-dur);
+	animation-timing-function: var(--m3-spring);
+}
+
+/* The recording strip and the attachment strip slide in on a spring. */
+.composer-recording,
+.composer-attachment {
+	animation: m3-rise-in var(--m3-dur) var(--m3-spring) both;
+}
+.rec-dot {
+	width: 12px;
+	height: 12px;
+	animation: m3-blob 2.4s ease-in-out infinite;
+}
+.rec-meter-bar {
+	transition: height 160ms var(--m3-spring-fast);
+	border-radius: 999px;
+}
+.staged-item {
+	animation: m3-pop-in var(--m3-dur-fast) var(--m3-spring-fast) both;
+}
+.emoji-panel {
+	transform-origin: bottom left;
+	animation: m3-menu-in var(--m3-dur) var(--m3-spring) both;
+	border-radius: var(--m3-shape-l);
+}
+
+/* --- Chat list ---------------------------------------------------------------- */
+
+.conv-item {
+	border-radius: var(--m3-shape-m);
+	transition:
+		border-radius var(--m3-dur) var(--m3-spring),
+		background-color 220ms var(--m3-effects),
+		transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.conv-item:hover {
+	background: var(--m3-state-hover);
+}
+.conv-item:active {
+	scale: 0.98;
+}
+/* The selected chat becomes a tonal pill instead of a solid slab. */
+.conv-item.active,
+.conv-item.active:hover {
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+	border-radius: var(--m3-shape-xl);
+}
+.conv-item.active .conv-item-title,
+.conv-item.active .conv-item-title-text {
+	color: var(--m3-on-primary-container);
+}
+.conv-item.active .conv-item-sub,
+.conv-item.active .conv-pin,
+.conv-item.active .conv-mute {
+	color: color-mix(in srgb, var(--m3-on-primary-container) 70%, transparent);
+}
+.conv-item.active .conv-badge {
+	background: var(--accent);
+	color: var(--on-accent);
+}
+.conv-item.active .conv-mention {
+	background: var(--accent);
+	color: var(--on-accent);
+}
+.conv-avatar {
+	transition: border-radius var(--m3-dur) var(--m3-spring), transform var(--m3-dur) var(--m3-spring),
+		scale var(--m3-dur) var(--m3-spring);
+}
+.conv-item.active .conv-avatar {
+	border-radius: 34%;
+}
+.conv-item:hover .conv-avatar {
+	scale: 1.04;
+}
+.conv-badge,
+.folder-tab-badge,
+.request-badge {
+	animation: m3-pop-in var(--m3-dur) var(--m3-spring-bouncy) both;
+}
+.presence-dot.online {
+	animation: m3-pop-in var(--m3-dur) var(--m3-spring-bouncy) both;
+}
+
+.folder-tab {
+	border-radius: var(--m3-shape-xs);
+	transition:
+		border-radius var(--m3-dur) var(--m3-spring),
+		background-color 220ms var(--m3-effects),
+		color 220ms var(--m3-effects),
+		transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.folder-tab.active {
+	border-radius: var(--m3-shape-full);
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+	border-color: transparent;
+}
+.folder-tab:active {
+	scale: 0.94;
+}
+
+/* --- Messages ------------------------------------------------------------------ */
+
+.bubble {
+	border-radius: var(--m3-shape-l) var(--m3-shape-l) var(--m3-shape-l) 6px;
+}
+.bubble.mine {
+	border-radius: var(--m3-shape-l) var(--m3-shape-l) 6px var(--m3-shape-l);
+}
+.message-row.msg-enter .bubble {
+	transform-origin: bottom left;
+	animation: m3-bubble-in var(--m3-dur-bouncy) var(--m3-spring-bouncy) both;
+}
+.message-row.mine.msg-enter .bubble {
+	transform-origin: bottom right;
+}
+.message-row.msg-enter .msg-avatar,
+.message-row.msg-enter .msg-avatar-fallback {
+	animation: m3-pop-in var(--m3-dur) var(--m3-spring-bouncy) both;
+}
+.day-divider span {
+	border-radius: var(--m3-shape-full);
+	background: var(--m3-surface-container-high);
+	animation: m3-fade-in 300ms var(--m3-effects) both;
+}
+.reaction {
+	border-radius: var(--m3-shape-full);
+	animation: m3-pop-in var(--m3-dur) var(--m3-spring-bouncy) both;
+	transition: transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast), background-color 200ms var(--m3-effects), border-radius var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.reaction:hover {
+	scale: 1.08;
+}
+.reaction:active {
+	scale: 0.88;
+	border-radius: var(--m3-shape-xs);
+}
+.reaction-pick {
+	transition: transform var(--m3-dur-fast) var(--m3-spring-bouncy),
+		scale var(--m3-dur-fast) var(--m3-spring-bouncy);
+}
+.reaction-pick:hover {
+	scale: 1.3;
+}
+
+/* Play turns into a rounded square while playing, like the M3 media button. */
+.voice-play {
+	transition: border-radius var(--m3-dur) var(--m3-spring), transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast), background-color 200ms var(--m3-effects);
+}
+.voice-play.is-playing {
+	border-radius: var(--m3-shape-s);
+}
+.voice-play:not(:disabled):active {
+	scale: 0.88;
+}
+.voice-bar {
+	transition: background-color 180ms var(--m3-effects), transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.voice-bar.played {
+	scale: 1 1.08;
+}
+.video-play {
+	transition: transform var(--m3-dur) var(--m3-spring-bouncy),
+		scale var(--m3-dur) var(--m3-spring-bouncy), border-radius var(--m3-dur) var(--m3-spring), background-color 200ms var(--m3-effects);
+}
+/* The play button is centred with translate(-50%, -50%); growing it inside
+   the same transform, after the translate, keeps its centre exactly still. */
+.video-poster:hover .video-play {
+	transform: translate(-50%, -50%) scale(1.12);
+	border-radius: var(--m3-shape-m);
+}
+.bubble-image,
+.video-poster,
+.link-card {
+	border-radius: var(--m3-shape-m);
+	transition: transform var(--m3-dur) var(--m3-spring),
+		scale var(--m3-dur) var(--m3-spring), filter 200ms var(--m3-effects);
+}
+.bubble-image.clickable:hover {
+	scale: 1.015;
+}
+.link-card:hover {
+	filter: brightness(1.06);
+}
+
+.poll-bar {
+	height: 6px;
+	border-radius: var(--m3-shape-full);
+}
+.poll-bar span {
+	transition: width 700ms var(--m3-spring);
+}
+.poll-choice {
+	border-radius: var(--m3-shape-s);
+	transition: border-radius var(--m3-dur) var(--m3-spring), background-color 200ms var(--m3-effects), transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.poll-choice.selected {
+	border-radius: var(--m3-shape-l);
+}
+.poll-choice:active {
+	scale: 0.98;
+}
+
+.typing {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	animation: m3-fade-in 240ms var(--m3-effects) both;
+}
+.typing-dots {
+	display: inline-flex;
+	gap: 3px;
+	padding: 6px 9px;
+	border-radius: var(--m3-shape-full);
+	background: var(--m3-surface-container-high);
+}
+.typing-dots i {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--accent);
+	animation: m3-typing 1.2s ease-in-out infinite;
+}
+.typing-dots i:nth-child(2) {
+	animation-delay: 0.15s;
+}
+.typing-dots i:nth-child(3) {
+	animation-delay: 0.3s;
+}
+
+.pinned-bar {
+	animation: m3-fade-in 240ms var(--m3-effects) both;
+}
+.banner {
+	border-radius: var(--m3-shape-m);
+	animation: m3-rise-in var(--m3-dur) var(--m3-spring) both;
+}
+
+/* --- Dialogs, menus, toasts ---------------------------------------------------- */
+
+.modal-backdrop {
+	animation: m3-fade-in 220ms var(--m3-effects) both;
+}
+.modal {
+	border-radius: var(--m3-shape-xl);
+	animation: m3-dialog-in var(--m3-dur) var(--m3-spring) both;
+}
+.msg-menu,
+.more-menu,
+.msg-picker {
+	border-radius: var(--m3-shape-m);
+	animation: m3-menu-in var(--m3-dur-fast) var(--m3-spring-fast) both;
+}
+.more-menu {
+	transform-origin: top right;
+}
+.msg-menu-item,
+.more-menu-item {
+	border-radius: var(--m3-shape-s);
+	transition: background-color 160ms var(--m3-effects), border-radius var(--m3-dur-fast) var(--m3-spring-fast), transform var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast);
+}
+.msg-menu-item:active,
+.more-menu-item:active {
+	scale: 0.97;
+	border-radius: var(--m3-shape-full);
+}
+.toast {
+	border-radius: var(--m3-shape-l);
+	animation: m3-rise-in var(--m3-dur) var(--m3-spring-bouncy) both;
+}
+
+/* --- Inputs and toggles ---------------------------------------------------------- */
+
+.input {
+	transition: border-color 200ms var(--m3-effects), box-shadow 200ms var(--m3-effects), border-radius var(--m3-dur) var(--m3-spring);
+}
+.input:focus {
+	box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.seg-thumb {
+	transition: transform var(--m3-dur) var(--m3-spring-bouncy),
+		scale var(--m3-dur) var(--m3-spring-bouncy), width var(--m3-dur) var(--m3-spring);
+}
+.seg-btn:active {
+	scale: 0.92;
+}
+.auth-card {
+	border-radius: var(--m3-shape-xl);
+	animation: m3-dialog-in var(--m3-dur) var(--m3-spring) both;
+}
+
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+
+/* ==========================================================================
+   The FrontierX site's visual language inside the app: tonal surfaces instead
+   of hairlines, heavy expressive headings, tonal buttons, soft fields, section
+   cards, and slow morphing shapes on the welcome and empty screens.
+   ========================================================================== */
+
+:root {
+	--m3-secondary-container: color-mix(in srgb, var(--accent) 16%, var(--bg-elevated));
+	--m3-on-secondary-container: var(--text-strong);
+}
+
+/* Surfaces are separated by tone, not by lines. */
+.sidebar {
+	border-right-color: transparent;
+}
+.thread-header {
+	border-bottom-color: transparent;
+	box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 60%, transparent);
+}
+.brand {
+	font-weight: 800;
+	letter-spacing: -0.01em;
+}
+
+/* Expressive type. */
+.thread-title {
+	font-size: 18px;
+	font-weight: 800;
+	letter-spacing: -0.015em;
+}
+.modal-title {
+	font-size: 24px;
+	font-weight: 800;
+	letter-spacing: -0.02em;
+}
+.settings-section-title {
+	font-size: 16px;
+	font-weight: 800;
+	letter-spacing: -0.01em;
+}
+.conv-item-title-text {
+	font-weight: 700;
+}
+.tag {
+	padding: 3px 10px;
+	background: var(--m3-secondary-container);
+	color: var(--m3-on-secondary-container);
+	font-weight: 700;
+}
+
+/* Buttons: outlined ghosts become tonal, filled ones lose the glow at rest. */
+.button.ghost {
+	border-color: transparent;
+	background: var(--m3-secondary-container);
+	color: var(--m3-on-secondary-container);
+}
+.button.ghost:not(:disabled):hover {
+	background: color-mix(in srgb, var(--m3-secondary-container) 82%, var(--text));
+}
+.button.primary {
+	box-shadow: none;
+}
+.button.primary:not(:disabled):hover {
+	background: var(--accent-hover);
+	box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 30%, transparent);
+	border-radius: var(--m3-shape-l);
+}
+
+/* Sidebar tools and account buttons use the same tonal pills. */
+.sidebar-filter,
+.sidebar-tool,
+.logout {
+	border-color: transparent;
+	border-radius: var(--m3-shape-full);
+	background: var(--m3-secondary-container);
+	color: var(--m3-on-secondary-container);
+	font-weight: 600;
+	transition:
+		border-radius var(--m3-dur-fast) var(--m3-spring-fast),
+		scale var(--m3-dur-fast) var(--m3-spring-fast),
+		background-color 200ms var(--m3-effects);
+}
+.sidebar-filter {
+	min-height: 40px;
+}
+.sidebar-tool {
+	min-height: 38px;
+}
+.sidebar-filter:hover,
+.sidebar-tool:not(:disabled):hover,
+.logout:hover {
+	background: color-mix(in srgb, var(--m3-secondary-container) 82%, var(--text));
+}
+.sidebar-filter:active,
+.sidebar-tool:not(:disabled):active,
+.logout:active {
+	border-radius: var(--m3-shape-s);
+	scale: 0.96;
+}
+.sidebar-filter[aria-pressed="true"] {
+	border-radius: var(--m3-shape-s);
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+}
+
+/* Fields: filled, borderless at rest, rounder and outlined when focused. */
+.input {
+	border-color: transparent;
+	border-radius: var(--m3-shape-m);
+	padding: 12px 16px;
+	font-size: 15px;
+}
+.input:focus {
+	border-color: var(--accent);
+	border-radius: var(--m3-shape-l);
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+	outline: none;
+}
+:root[data-theme="light"] .modal .input,
+:root[data-theme="nord"] .modal .input {
+	background: var(--m3-surface-container-high);
+}
+
+/* Dialogs are tonal sheets; settings sections turn into cards. */
+.modal {
+	border-color: transparent;
+	border-radius: 32px;
+}
+.settings-dialog .settings-section {
+	margin-top: 12px;
+	padding: 20px;
+	border-top: none;
+	border-radius: var(--m3-shape-l);
+	background: var(--m3-surface-container);
+}
+.settings-dialog .settings-section:first-of-type {
+	margin-top: 8px;
+	padding-top: 20px;
+}
+
+/* Welcome screens: a big heading, a tonal card, and slow shapes behind it. */
+.auth-shell {
+	position: relative;
+	overflow: hidden;
+	isolation: isolate;
+	background: var(--bg-app);
+}
+.auth-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: -1;
+	pointer-events: none;
+}
+.m3-blob {
+	display: block;
+}
+.m3-blob svg {
+	display: block;
+	overflow: visible;
+}
+.m3-blob path {
+	fill: var(--m3-primary-container);
+}
+.auth-blob {
+	position: absolute;
+}
+.auth-blob.one {
+	width: min(620px, 90vw);
+	height: min(620px, 90vw);
+	left: max(-160px, calc(50% - 620px));
+	top: -120px;
+	opacity: 0.85;
+}
+.auth-blob.two {
+	width: min(340px, 60vw);
+	height: min(340px, 60vw);
+	right: max(-80px, calc(50% - 560px));
+	bottom: -60px;
+}
+.auth-blob.two path {
+	fill: color-mix(in srgb, #ff8a80 30%, var(--bg-panel));
+}
+.auth-card {
+	border-color: transparent;
+	border-radius: 32px;
+	background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+	backdrop-filter: blur(18px);
+	-webkit-backdrop-filter: blur(18px);
+}
+.auth-brand-name {
+	font-size: 24px;
+	letter-spacing: -0.02em;
+}
+.auth-title {
+	font-size: 28px;
+	font-weight: 800;
+	letter-spacing: -0.025em;
+}
+
+/* "No chat selected": a morphing shape with a chat icon, and a big title. */
+.empty-art {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 180px;
+	height: 180px;
+	margin-bottom: 18px;
+}
+.empty-blob {
+	position: absolute;
+	inset: 0;
+}
+.empty-icon {
+	position: relative;
+	width: 56px;
+	height: 56px;
+	color: var(--m3-on-primary-container);
+}
+.empty-title {
+	font-size: clamp(26px, 2.6vw, 36px);
+	font-weight: 800;
+	letter-spacing: -0.03em;
+	margin-bottom: 10px;
+}
+.empty-sub {
+	font-size: 16px;
+}
+.thread-empty {
+	display: grid;
+	justify-items: center;
+	gap: 14px;
+	margin: auto;
+	padding: 48px 16px;
+	color: var(--text-muted);
+	font-size: 15px;
+	text-align: center;
+	animation: m3-fade-in 300ms var(--m3-effects) both;
+}
+.thread-empty-art {
+	width: 120px;
+	height: 120px;
+}
+.thread-empty-art .m3-blob path {
+	fill: var(--m3-surface-container-high);
+}
+
+/* --- Shaped avatars: groups wear a cookie, channels a clover ----------------- */
+/* The same M3 shapes the site uses for its icons; one-to-one chats stay round,
+   so the kind of chat reads at a glance. */
+.conv-avatar.shape-group,
+.invite-avatar.shape-group,
+.m3-avatar.shape-group {
+	border-radius: 0;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50.00 0.00L52.17 0.31L54.27 1.21L56.24 2.57L58.07 4.21L59.77 5.91L61.39 7.47L63.01 8.74L64.71 9.59L66.56 10.03L68.61 10.10L70.85 9.94L73.25 9.73L75.70 9.65L78.09 9.88L80.28 10.54L82.14 11.70L83.60 13.33L84.63 15.37L85.27 17.68L85.62 20.11L85.83 22.51L86.06 24.75L86.49 26.75L87.24 28.50L88.38 30.02L89.90 31.39L91.72 32.72L93.70 34.10L95.63 35.61L97.31 37.32L98.55 39.24L99.24 41.32L99.31 43.51L98.79 45.73L97.79 47.91L96.50 50.00L95.12 51.97L93.86 53.84L92.90 55.65L92.35 57.47L92.24 59.36L92.53 61.39L93.07 63.58L93.70 65.90L94.20 68.31L94.39 70.70L94.11 72.96L93.30 75.00L91.94 76.72L90.12 78.09L87.95 79.12L85.62 79.89L83.30 80.51L81.13 81.13L79.23 81.90L77.64 82.94L76.34 84.33L75.25 86.06L74.26 88.09L73.25 90.27L72.09 92.43L70.70 94.39L69.03 95.95L67.10 96.98L64.96 97.43L62.68 97.31L60.35 96.71L58.07 95.79L55.89 94.77L53.84 93.86L51.89 93.23L50.00 93.00L48.11 93.23L46.16 93.86L44.11 94.77L41.93 95.79L39.65 96.71L37.32 97.31L35.04 97.43L32.90 96.98L30.97 95.95L29.30 94.39L27.91 92.43L26.75 90.27L25.74 88.09L24.75 86.06L23.66 84.33L22.36 82.94L20.77 81.90L18.87 81.13L16.70 80.51L14.38 79.89L12.05 79.12L9.88 78.09L8.06 76.72L6.70 75.00L5.89 72.96L5.61 70.70L5.80 68.31L6.30 65.90L6.93 63.58L7.47 61.39L7.76 59.36L7.65 57.47L7.10 55.65L6.14 53.84L4.88 51.97L3.50 50.00L2.21 47.91L1.21 45.73L0.69 43.51L0.76 41.32L1.45 39.24L2.69 37.32L4.37 35.61L6.30 34.10L8.28 32.72L10.10 31.39L11.62 30.02L12.76 28.50L13.51 26.75L13.94 24.75L14.17 22.51L14.38 20.11L14.73 17.68L15.37 15.37L16.40 13.33L17.86 11.70L19.72 10.54L21.91 9.88L24.30 9.65L26.75 9.73L29.15 9.94L31.39 10.10L33.44 10.03L35.29 9.59L36.99 8.74L38.61 7.47L40.23 5.91L41.93 4.21L43.76 2.57L45.73 1.21L47.83 0.31Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50.00 0.00L52.17 0.31L54.27 1.21L56.24 2.57L58.07 4.21L59.77 5.91L61.39 7.47L63.01 8.74L64.71 9.59L66.56 10.03L68.61 10.10L70.85 9.94L73.25 9.73L75.70 9.65L78.09 9.88L80.28 10.54L82.14 11.70L83.60 13.33L84.63 15.37L85.27 17.68L85.62 20.11L85.83 22.51L86.06 24.75L86.49 26.75L87.24 28.50L88.38 30.02L89.90 31.39L91.72 32.72L93.70 34.10L95.63 35.61L97.31 37.32L98.55 39.24L99.24 41.32L99.31 43.51L98.79 45.73L97.79 47.91L96.50 50.00L95.12 51.97L93.86 53.84L92.90 55.65L92.35 57.47L92.24 59.36L92.53 61.39L93.07 63.58L93.70 65.90L94.20 68.31L94.39 70.70L94.11 72.96L93.30 75.00L91.94 76.72L90.12 78.09L87.95 79.12L85.62 79.89L83.30 80.51L81.13 81.13L79.23 81.90L77.64 82.94L76.34 84.33L75.25 86.06L74.26 88.09L73.25 90.27L72.09 92.43L70.70 94.39L69.03 95.95L67.10 96.98L64.96 97.43L62.68 97.31L60.35 96.71L58.07 95.79L55.89 94.77L53.84 93.86L51.89 93.23L50.00 93.00L48.11 93.23L46.16 93.86L44.11 94.77L41.93 95.79L39.65 96.71L37.32 97.31L35.04 97.43L32.90 96.98L30.97 95.95L29.30 94.39L27.91 92.43L26.75 90.27L25.74 88.09L24.75 86.06L23.66 84.33L22.36 82.94L20.77 81.90L18.87 81.13L16.70 80.51L14.38 79.89L12.05 79.12L9.88 78.09L8.06 76.72L6.70 75.00L5.89 72.96L5.61 70.70L5.80 68.31L6.30 65.90L6.93 63.58L7.47 61.39L7.76 59.36L7.65 57.47L7.10 55.65L6.14 53.84L4.88 51.97L3.50 50.00L2.21 47.91L1.21 45.73L0.69 43.51L0.76 41.32L1.45 39.24L2.69 37.32L4.37 35.61L6.30 34.10L8.28 32.72L10.10 31.39L11.62 30.02L12.76 28.50L13.51 26.75L13.94 24.75L14.17 22.51L14.38 20.11L14.73 17.68L15.37 15.37L16.40 13.33L17.86 11.70L19.72 10.54L21.91 9.88L24.30 9.65L26.75 9.73L29.15 9.94L31.39 10.10L33.44 10.03L35.29 9.59L36.99 8.74L38.61 7.47L40.23 5.91L41.93 4.21L43.76 2.57L45.73 1.21L47.83 0.31Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.conv-avatar.shape-channel,
+.invite-avatar.shape-channel,
+.m3-avatar.shape-channel {
+	border-radius: 0;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50.00 0.00L52.18 0.10L54.34 0.41L56.46 0.92L58.53 1.63L60.52 2.55L62.41 3.68L64.18 5.03L65.77 6.68L66.84 9.35L67.71 12.02L68.86 13.77L70.02 15.32L71.17 16.77L72.30 18.15L73.43 19.46L74.57 20.72L75.71 21.94L76.87 23.13L78.06 24.29L79.28 25.43L80.54 26.57L81.85 27.70L83.23 28.83L84.68 29.98L86.23 31.14L87.98 32.29L90.65 33.16L93.32 34.23L94.97 35.82L96.32 37.59L97.45 39.48L98.37 41.47L99.08 43.54L99.59 45.66L99.90 47.82L100.00 50.00L99.90 52.18L99.59 54.34L99.08 56.46L98.37 58.53L97.45 60.52L96.32 62.41L94.97 64.18L93.32 65.77L90.65 66.84L87.98 67.71L86.23 68.86L84.68 70.02L83.23 71.17L81.85 72.30L80.54 73.43L79.28 74.57L78.06 75.71L76.87 76.87L75.71 78.06L74.57 79.28L73.43 80.54L72.30 81.85L71.17 83.23L70.02 84.68L68.86 86.23L67.71 87.98L66.84 90.65L65.77 93.32L64.18 94.97L62.41 96.32L60.52 97.45L58.53 98.37L56.46 99.08L54.34 99.59L52.18 99.90L50.00 100.00L47.82 99.90L45.66 99.59L43.54 99.08L41.47 98.37L39.48 97.45L37.59 96.32L35.82 94.97L34.23 93.32L33.16 90.65L32.29 87.98L31.14 86.23L29.98 84.68L28.83 83.23L27.70 81.85L26.57 80.54L25.43 79.28L24.29 78.06L23.13 76.87L21.94 75.71L20.72 74.57L19.46 73.43L18.15 72.30L16.77 71.17L15.32 70.02L13.77 68.86L12.02 67.71L9.35 66.84L6.68 65.77L5.03 64.18L3.68 62.41L2.55 60.52L1.63 58.53L0.92 56.46L0.41 54.34L0.10 52.18L0.00 50.00L0.10 47.82L0.41 45.66L0.92 43.54L1.63 41.47L2.55 39.48L3.68 37.59L5.03 35.82L6.68 34.23L9.35 33.16L12.02 32.29L13.77 31.14L15.32 29.98L16.77 28.83L18.15 27.70L19.46 26.57L20.72 25.43L21.94 24.29L23.13 23.13L24.29 21.94L25.43 20.72L26.57 19.46L27.70 18.15L28.83 16.77L29.98 15.32L31.14 13.77L32.29 12.02L33.16 9.35L34.23 6.68L35.82 5.03L37.59 3.68L39.48 2.55L41.47 1.63L43.54 0.92L45.66 0.41L47.82 0.10Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath d='M50.00 0.00L52.18 0.10L54.34 0.41L56.46 0.92L58.53 1.63L60.52 2.55L62.41 3.68L64.18 5.03L65.77 6.68L66.84 9.35L67.71 12.02L68.86 13.77L70.02 15.32L71.17 16.77L72.30 18.15L73.43 19.46L74.57 20.72L75.71 21.94L76.87 23.13L78.06 24.29L79.28 25.43L80.54 26.57L81.85 27.70L83.23 28.83L84.68 29.98L86.23 31.14L87.98 32.29L90.65 33.16L93.32 34.23L94.97 35.82L96.32 37.59L97.45 39.48L98.37 41.47L99.08 43.54L99.59 45.66L99.90 47.82L100.00 50.00L99.90 52.18L99.59 54.34L99.08 56.46L98.37 58.53L97.45 60.52L96.32 62.41L94.97 64.18L93.32 65.77L90.65 66.84L87.98 67.71L86.23 68.86L84.68 70.02L83.23 71.17L81.85 72.30L80.54 73.43L79.28 74.57L78.06 75.71L76.87 76.87L75.71 78.06L74.57 79.28L73.43 80.54L72.30 81.85L71.17 83.23L70.02 84.68L68.86 86.23L67.71 87.98L66.84 90.65L65.77 93.32L64.18 94.97L62.41 96.32L60.52 97.45L58.53 98.37L56.46 99.08L54.34 99.59L52.18 99.90L50.00 100.00L47.82 99.90L45.66 99.59L43.54 99.08L41.47 98.37L39.48 97.45L37.59 96.32L35.82 94.97L34.23 93.32L33.16 90.65L32.29 87.98L31.14 86.23L29.98 84.68L28.83 83.23L27.70 81.85L26.57 80.54L25.43 79.28L24.29 78.06L23.13 76.87L21.94 75.71L20.72 74.57L19.46 73.43L18.15 72.30L16.77 71.17L15.32 70.02L13.77 68.86L12.02 67.71L9.35 66.84L6.68 65.77L5.03 64.18L3.68 62.41L2.55 60.52L1.63 58.53L0.92 56.46L0.41 54.34L0.10 52.18L0.00 50.00L0.10 47.82L0.41 45.66L0.92 43.54L1.63 41.47L2.55 39.48L3.68 37.59L5.03 35.82L6.68 34.23L9.35 33.16L12.02 32.29L13.77 31.14L15.32 29.98L16.77 28.83L18.15 27.70L19.46 26.57L20.72 25.43L21.94 24.29L23.13 23.13L24.29 21.94L25.43 20.72L26.57 19.46L27.70 18.15L28.83 16.77L29.98 15.32L31.14 13.77L32.29 12.02L33.16 9.35L34.23 6.68L35.82 5.03L37.59 3.68L39.48 2.55L41.47 1.63L43.54 0.92L45.66 0.41L47.82 0.10Z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.conv-item .conv-avatar.shape-group,
+.conv-item .conv-avatar.shape-channel {
+	transition: rotate var(--m3-dur) var(--m3-spring-bouncy), scale var(--m3-dur) var(--m3-spring);
+}
+.conv-item.active .conv-avatar.shape-group,
+.conv-item.active .conv-avatar.shape-channel {
+	border-radius: 0;
+}
+
+/* --- Less motion ------------------------------------------------------------------ */
+
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+	animation-duration: 1ms !important;
+	animation-iteration-count: 1 !important;
+	transition-duration: 1ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 1ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 1ms !important;
+	}
+}

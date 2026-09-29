@@ -1,0 +1,5 @@
+"NSMicrophoneUsageDescription" = "FrontierX uses the microphone for calls and voice messages.";
+"NSCameraUsageDescription" = "FrontierX uses the camera for video calls and to take photos to send.";
+"NSPhotoLibraryUsageDescription" = "FrontierX opens the photos and videos you choose to send.";
+"NSPhotoLibraryAddUsageDescription" = "FrontierX saves to Photos what you decide to keep.";
+"NSLocationWhenInUseUsageDescription" = "FrontierX uses your location only when you send it to a chat.";

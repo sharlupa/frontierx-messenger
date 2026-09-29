@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FrontierX — подключение</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: #0e1621; color: #e8eef4;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .card {
+    width: min(440px, 92vw); background: #17212b; border: 1px solid #22303c;
+    border-radius: 14px; padding: 28px 26px; box-shadow: 0 18px 50px rgba(0,0,0,.45);
+  }
+  h1 { margin: 0 0 6px; font-size: 20px; }
+  p.sub { margin: 0 0 18px; color: #9db1c2; font-size: 13px; line-height: 1.5; }
+  label { display: block; font-size: 12px; color: #9db1c2; margin: 0 0 6px; }
+  input {
+    width: 100%; padding: 11px 12px; border-radius: 9px; border: 1px solid #2b3947;
+    background: #0e1621; color: #e8eef4; font-size: 14px; outline: none;
+  }
+  input:focus { border-color: #3d84c6; }
+  button {
+    margin-top: 16px; width: 100%; padding: 11px 12px; border: 0; border-radius: 9px;
+    background: #3d84c6; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  button:hover { background: #4b93d6; }
+  button:disabled { opacity: .6; cursor: default; }
+  .hint { margin-top: 14px; font-size: 12px; color: #7f95a8; line-height: 1.6; }
+  .hint code { background: #0e1621; padding: 1px 6px; border-radius: 5px; border: 1px solid #2b3947; }
+  .error { display: none; margin: 0 0 16px; padding: 10px 12px; border-radius: 9px;
+    background: #3a1d24; border: 1px solid #5b2a34; color: #ffb4bf; font-size: 13px; }
+  .error.show { display: block; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Подключение к серверу FrontierX</h1>
+    <p class="sub">Укажи адрес сервера FrontierX, к которому подключаться. Это может быть локальный сервер или твой будущий сервер в интернете.</p>
+    <div id="error" class="error">Не удалось подключиться к серверу. Проверь адрес и что сервер запущен.</div>
+    <label for="url">Адрес сервера</label>
+    <input id="url" type="text" placeholder="http://localhost:8080" autocomplete="off" spellcheck="false" />
+    <button id="save">Подключиться</button>
+    <p class="hint">
+      Примеры:<br>
+      • локально на этом ПК: <code>http://localhost:8080</code><br>
+      • в локальной сети: <code>http://192.168.1.50:8080</code><br>
+      • свой сервер: <code>https://chat.example.com</code>
+    </p>
+  </div>
+  <script>
+    const params = new URLSearchParams(location.search)
+    if (params.get("error") === "1") document.getElementById("error").classList.add("show")
+    const input = document.getElementById("url")
+    const button = document.getElementById("save")
+    async function init() {
+      try {
+        const cfg = await window.frontierxDesktop.getConfig()
+        if (cfg && cfg.serverUrl) input.value = cfg.serverUrl
+      } catch (e) {}
+      input.focus()
+    }
+    async function save() {
+      const value = input.value.trim()
+      if (!value) { input.focus(); return }
+      button.disabled = true
+      button.textContent = "Подключаю…"
+      try {
+        await window.frontierxDesktop.saveServerUrl(value)
+      } catch (e) {
+        button.disabled = false
+        button.textContent = "Подключиться"
+      }
+    }
+    button.addEventListener("click", save)
+    input.addEventListener("keydown", (e) => { if (e.key === "Enter") save() })
+    init()
+  </script>
+</body>
+</html>

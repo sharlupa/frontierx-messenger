@@ -1,0 +1,29 @@
+<header class="nav" data-nav-bar>
+	<div class="wrap nav-in">
+		<a class="brand" href="/home" data-nav="home"><img src="/favicon.svg" alt="" width="32" height="32" /><span>FrontierX</span></a>
+		<nav class="nav-links" aria-label="Основное меню" data-i18n-attr="aria-label:nav.aria">
+			<a href="/features" data-nav="features" data-i18n="nav.features">Возможности</a>
+			<a href="/download" data-nav="download" data-i18n="nav.download">Загрузки</a>
+			<a href="/changes" data-nav="changes" data-i18n="nav.changes">Что нового</a>
+		</nav>
+		<div class="nav-right">
+			<div class="seg" role="group" aria-label="Язык / Language">
+				<span class="seg-thumb" aria-hidden="true"></span>
+				<button type="button" data-lang="ru" aria-pressed="true">RU</button>
+				<button type="button" data-lang="en" aria-pressed="false">EN</button>
+			</div>
+			<a class="btn btn-tonal nav-cta" href="/app" data-app-cta data-i18n="nav.open">Открыть в браузере</a>
+			<button type="button" class="nav-burger" aria-expanded="false" aria-controls="nav-sheet" data-menu>
+				<span class="sr" data-i18n="nav.menu">Меню</span>
+				<span class="burger-lines" aria-hidden="true"><i></i><i></i><i></i></span>
+			</button>
+		</div>
+	</div>
+	<div class="nav-sheet" id="nav-sheet" hidden>
+		<a href="/home" data-nav="home" data-i18n="nav.home">Главная</a>
+		<a href="/features" data-nav="features" data-i18n="nav.features">Возможности</a>
+		<a href="/download" data-nav="download" data-i18n="nav.download">Загрузки</a>
+		<a href="/changes" data-nav="changes" data-i18n="nav.changes">Что нового</a>
+		<a class="btn btn-primary" href="/app" data-app-cta data-i18n="nav.open">Открыть в браузере</a>
+	</div>
+</header>

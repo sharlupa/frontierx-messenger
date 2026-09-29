@@ -1,0 +1,5 @@
+FrontierX.xcodeproj/
+FrontierX/Info.plist
+build/
+DerivedData/
+*.xcuserstate
