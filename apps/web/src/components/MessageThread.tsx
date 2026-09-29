@@ -14,7 +14,9 @@ import { renderRichText, stripFormatting } from "../lib/richtext"
 import { LoadingBlock, LoadingIndicator, MorphBlob, WavyCircle, WavyProgress } from "./Expressive"
 import type { PendingUpload } from "../routes/Chat"
 import { ContactBubble, LocationBubble } from "./RichBubbles"
-import { IBellOff, IBot, IEyeOff, ILink } from "./m3icons"
+import { IBellOff, IBot, IChat, ICopy, IDownload, IEdit, IEyeOff, IForward, ILink, IPin, IPinOff, IReply, ISmilePlus, ITrash } from "./m3icons"
+import { Menu, type MenuItemSpec } from "./m3"
+import { useContextMenuGesture } from "../lib/longpress"
 import type { BotButton } from "../lib/botmsg"
 const SENDER_COLORS = ["#e17076", "#7bc862", "#65aadd", "#a695e7", "#ee7aae", "#6ec9cb", "#f2a45c"]
 function senderColor(seed: string): string {
@@ -604,7 +606,7 @@ function TickMark(props: { read: boolean }) {
 	return createElement("span", { className: "read-ticks" + (props.read ? " read" : "") }, createElement("svg", { viewBox: "0 0 16 16", width: 15, height: 15, fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" }, marks))
 }
 export function MessageThread({
-	messages,
+	messages: allMessages,
 	reactions,
 	currentUserId,
 members = [],
@@ -683,6 +685,40 @@ members?: ConversationMember[]
 	onBotButton?: (message: DisplayMessage, button: BotButton) => Promise<void>
 }) {
 	const { t, lang } = useSettings()
+	// Deleted messages leave the chat instead of turning into a notice: one that
+	// was on screen plays a short exit, the rest are simply not drawn.
+	const seenAliveRef = useRef(new Set<string>())
+	const lastAliveRef = useRef(new Map<string, DisplayMessage>())
+	const [leaving, setLeaving] = useState<Set<string>>(() => new Set())
+	const goneRef = useRef(new Set<string>())
+	useEffect(() => {
+		const start: string[] = []
+		for (const message of allMessages) {
+			if (!message.deleted) {
+				seenAliveRef.current.add(message.id)
+				lastAliveRef.current.set(message.id, message)
+				continue
+			}
+			if (seenAliveRef.current.has(message.id) && !goneRef.current.has(message.id)) start.push(message.id)
+		}
+		if (start.length === 0) return
+		// Marked gone at once so a re-render cannot start the exit twice; the
+		// timer is not tied to this render, so the row always goes away.
+		for (const id of start) goneRef.current.add(id)
+		setLeaving((prev) => new Set([...prev, ...start]))
+		window.setTimeout(() => {
+			setLeaving((prev) => {
+				const next = new Set(prev)
+				for (const id of start) next.delete(id)
+				return next
+			})
+		}, 420)
+	}, [allMessages])
+	// While it leaves, a message keeps the look it had.
+	const messages = useMemo(
+		() => allMessages.filter((message) => !message.deleted || leaving.has(message.id)).map((message) => (message.deleted ? lastAliveRef.current.get(message.id) ?? message : message)),
+		[allMessages, leaving],
+	)
 	const endRef = useRef<HTMLDivElement | null>(null)
 	const lastIdRef = useRef<string | null>(null)
 	const convRef = useRef<string | null>(null)
@@ -800,6 +836,19 @@ members?: ConversationMember[]
 		}
 	}
 	const [pickerStyle, setPickerStyle] = useState<CSSProperties | null>(null)
+	const [contextMenu, setContextMenu] = useState<{ message: DisplayMessage; x: number; y: number } | null>(null)
+	const messageGesture = useContextMenuGesture((x, y, target) => {
+		const row = target?.closest?.("[data-message-id]") as HTMLElement | null
+		const message = row ? byIdRef.current.get(row.dataset.messageId ?? "") : undefined
+		if (!message || message.deleted) return false
+		// Right click on a link keeps the browser's own menu (copy link, open).
+		if (target?.closest?.("a[href]") && !("ontouchstart" in window)) return false
+		setMenuId(null)
+		setPickerId(null)
+		setContextMenu({ message, x, y })
+		return true
+	})
+	const byIdRef = useRef(new Map<string, DisplayMessage>())
 	const flashTimerRef = useRef<number | null>(null)
 	const jumpToRef = useRef<(id: string) => void>(() => undefined)
 	const jumpTo = useCallback((id: string) => {
@@ -880,6 +929,58 @@ members?: ConversationMember[]
 	}
 	const byId = new Map<string, DisplayMessage>()
 	for (const message of messages) byId.set(message.id, message)
+	byIdRef.current = byId
+
+	const contextItems = (message: DisplayMessage): MenuItemSpec[] => {
+		const mine = message.senderId === currentUserId
+		const isPinned = pinnedIds.has(message.id)
+		const text = message.locked ? "" : message.media ? message.media.caption ?? "" : message.text ?? ""
+		return [
+			{ key: "reply", label: t("reply"), icon: <IReply size={20} />, onSelect: () => onReply(message) },
+			...(!message.locked ? [{ key: "forward", label: t("forward"), icon: <IForward size={20} />, onSelect: () => onForward(message) }] : []),
+			...(text ? [{ key: "copy", label: t("copy"), icon: <ICopy size={20} />, onSelect: () => void navigator.clipboard?.writeText(stripFormatting(text)).catch(() => undefined) }] : []),
+			...(mine && !message.poll && !message.media && !message.locked && !message.location && !message.contact ? [{ key: "edit", label: t("edit"), icon: <IEdit size={20} />, onSelect: () => onEdit(message) }] : []),
+			...(canModerate ? [{ key: "pin", label: isPinned ? t("unpin") : t("pin"), icon: isPinned ? <IPinOff size={20} /> : <IPin size={20} />, onSelect: () => onTogglePin(message.id, !isPinned) }] : []),
+			...(message.media && !message.locked ? [{ key: "download", label: t("download"), icon: <IDownload size={20} />, onSelect: () => void downloadMedia(message) }] : []),
+			...(isChannel ? [{ key: "comments", label: t("comments"), icon: <IChat size={20} />, onSelect: () => onOpenComments(message) }] : []),
+			...(mine ? [{ key: "delete", label: t("deleteAction"), icon: <ITrash size={20} />, danger: true, onSelect: () => onDelete(message) }] : []),
+		]
+	}
+	const contextReactions = (message: DisplayMessage) => {
+		const mineReactions = new Set((byMessage.get(message.id) ?? []).filter((r) => r.userId === currentUserId).map((r) => r.emoji))
+		return (
+			<div className="ctx-reactions">
+				{REACTION_SET.slice(0, 7).map((emoji) => (
+					<button
+						key={emoji}
+						type="button"
+						className={"ctx-reaction" + (mineReactions.has(emoji) ? " mine" : "")}
+						onClick={() => {
+							setContextMenu(null)
+							onToggleReaction(message.id, emoji, !mineReactions.has(emoji))
+						}}
+					>
+						{emoji}
+					</button>
+				))}
+				<button
+					type="button"
+					className="ctx-reaction more"
+					aria-label={t("addReaction")}
+					onClick={() => {
+						const row = rowRefs.current.get(message.id)
+						const bubble = (row?.querySelector(".bubble") as HTMLElement | null) ?? row
+						setContextMenu(null)
+						if (!bubble) return
+						setPickerStyle(popoverStyle(bubble, message.senderId === currentUserId, 380, 328))
+						setPickerId(message.id)
+					}}
+				>
+					<ISmilePlus size={20} />
+				</button>
+			</div>
+		)
+	}
 
 	const pinnedLoaded = messages.filter((m) => pinnedIds.has(m.id) && !m.deleted)
 	const pinnedPreview = pinnedLoaded.length > 0 ? pinnedLoaded[pinnedLoaded.length - 1] : null
@@ -899,6 +1000,7 @@ members?: ConversationMember[]
 			onScroll={handleScroll}
 			onWheel={dropStick}
 			onTouchStart={dropStick}
+			{...messageGesture}
 			style={{ "--pinned-bar-h": String(Math.round(pinnedBarHeight)) + "px" } as CSSProperties}
 		>
 			{pinnedPreview ? (
@@ -929,6 +1031,15 @@ members?: ConversationMember[]
 					<p>{isSelf ? t("savedEmpty") : t("noMessages")}</p>
 				</div>
 			) : null}
+			{contextMenu ? (
+				<Menu
+					anchor={null}
+					point={{ x: contextMenu.x, y: contextMenu.y }}
+					header={contextReactions(contextMenu.message)}
+					items={contextItems(contextMenu.message)}
+					onClose={() => setContextMenu(null)}
+				/>
+			) : null}
 			{(menuId || pickerId) ? createPortal(<div className="msg-overlay" onClick={() => { setMenuId(null); setPickerId(null) }} />, document.body) : null}
 			{dayGroups.map((group) => (
 			<div className="day-group" key={group.key}>
@@ -950,7 +1061,7 @@ const senderAvatar = sender ? sender.avatar : null
 				const poll = message.poll ? pollsByMessage.get(message.id) ?? null : null
 				const mayClosePoll = message.senderId === currentUserId || canClosePoll
 				return (
-					<div key={message.id} className={rowClass} ref={(el) => void (el ? rowRefs.current.set(message.id, el) : rowRefs.current.delete(message.id))}>
+					<div key={message.id} data-message-id={message.id} className={rowClass + (leaving.has(message.id) ? " msg-leaving" : "")} ref={(el) => void (el ? rowRefs.current.set(message.id, el) : rowRefs.current.delete(message.id))}>
 {!mine ? (
 	senderAvatar ? (
 		<img className="msg-avatar" src={senderAvatar} alt={senderName} />

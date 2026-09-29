@@ -537,13 +537,27 @@ export function TextField(props: {
 export type MenuItemSpec = { key: string; label: ReactNode; icon?: ReactNode; onSelect: () => void; danger?: boolean; disabled?: boolean; hint?: ReactNode }
 
 // A floating menu anchored to an element, kept inside the viewport.
-export function Menu(props: { anchor: HTMLElement | null; items: MenuItemSpec[]; onClose: () => void; align?: "start" | "end"; placement?: "below" | "above" }) {
+// A menu under (or above) an element, or at a point: where the pointer was
+// right-clicked or a finger held. `header` sits above the items (reactions).
+export function Menu(props: { anchor: HTMLElement | null; point?: { x: number; y: number } | null; header?: ReactNode; items: MenuItemSpec[]; onClose: () => void; align?: "start" | "end"; placement?: "below" | "above" }) {
 	const ref = useRef<HTMLDivElement>(null)
 	const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" })
 	useLayoutEffect(() => {
-		const anchor = props.anchor
 		const menu = ref.current
-		if (!anchor || !menu) return
+		if (!menu) return
+		if (props.point) {
+			const margin = 8
+			const width = menu.offsetWidth
+			const height = menu.offsetHeight
+			const flipX = props.point.x + width > window.innerWidth - margin
+			const flipY = props.point.y + height > window.innerHeight - margin
+			const left = Math.max(margin, flipX ? props.point.x - width : props.point.x)
+			const top = Math.max(margin, Math.min(window.innerHeight - height - margin, flipY ? props.point.y - height : props.point.y))
+			setStyle({ left, top, transformOrigin: (flipY ? "bottom " : "top ") + (flipX ? "right" : "left") })
+			return
+		}
+		const anchor = props.anchor
+		if (!anchor) return
 		const rect = anchor.getBoundingClientRect()
 		const width = menu.offsetWidth
 		const height = menu.offsetHeight
@@ -554,7 +568,7 @@ export function Menu(props: { anchor: HTMLElement | null; items: MenuItemSpec[];
 		const above = rect.top - height - 6
 		const top = props.placement === "above" ? (above > margin ? above : below) : below + height > window.innerHeight - margin && above > margin ? above : below
 		setStyle({ left, top: Math.max(margin, top), transformOrigin: (top < rect.top ? "bottom " : "top ") + (props.align === "start" ? "left" : "right") })
-	}, [props.anchor, props.align, props.placement, props.items.length])
+	}, [props.anchor, props.point, props.align, props.placement, props.items.length])
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key === "Escape") props.onClose()
@@ -573,8 +587,9 @@ export function Menu(props: { anchor: HTMLElement | null; items: MenuItemSpec[];
 	}
 	return createPortal(
 		<>
-			<div className="m3-menu-scrim" onClick={props.onClose} />
-			<div ref={ref} className="m3-menu" role="menu" style={style} onKeyDown={onKeyDown}>
+			<div className="m3-menu-scrim" onClick={props.onClose} onContextMenu={(event) => { event.preventDefault(); props.onClose() }} />
+			<div ref={ref} className={"m3-menu" + (props.header ? " with-header" : "")} role="menu" style={style} onKeyDown={onKeyDown} onContextMenu={(event) => event.preventDefault()}>
+				{props.header ? <div className="m3-menu-header">{props.header}</div> : null}
 				{props.items.map((item) => (
 					<button
 						key={item.key}

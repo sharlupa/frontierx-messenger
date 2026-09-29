@@ -1909,3 +1909,80 @@ html {
 [tabindex="-1"]:focus {
 	outline: none;
 }
+
+/* --- context menus: messages and chats ------------------------------------------ */
+
+.m3-menu.with-header {
+	min-width: 260px;
+	padding-top: 6px;
+}
+.m3-menu-header {
+	padding: 2px 2px 6px;
+	margin-bottom: 4px;
+	border-bottom: 1px solid var(--m3-outline-variant);
+}
+.ctx-reactions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+}
+.ctx-reaction {
+	display: grid;
+	place-items: center;
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	font-size: 20px;
+	line-height: 1;
+	cursor: pointer;
+	transition: scale var(--m3-dur-fast) var(--m3-spring-bouncy), background-color 150ms var(--m3-effects);
+}
+.ctx-reaction:hover {
+	scale: 1.22;
+	background: var(--m3-state-hover);
+}
+.ctx-reaction:active {
+	scale: 0.9;
+}
+.ctx-reaction.mine {
+	background: var(--m3-primary-container);
+}
+.ctx-reaction.more {
+	color: var(--text-muted);
+	font-size: 0;
+}
+
+/* Long presses open the menu, not the phone's text selection callout. */
+.message-row,
+.conv-item {
+	-webkit-touch-callout: none;
+}
+@media (hover: none) {
+	.message-row .bubble-text,
+	.conv-item {
+		-webkit-user-select: none;
+		user-select: none;
+	}
+}
+
+/* A deleted message folds away instead of leaving a notice behind. */
+@keyframes fx-msg-leave {
+	0% { opacity: 1; transform: none; max-height: 600px; }
+	45% { opacity: 0; transform: scale(0.86); max-height: 600px; }
+	100% { opacity: 0; transform: scale(0.8); max-height: 0; margin-top: 0; margin-bottom: 0; padding-top: 0; padding-bottom: 0; }
+}
+.message-row.msg-leaving {
+	overflow: hidden;
+	pointer-events: none;
+	transform-origin: center;
+	animation: fx-msg-leave 420ms var(--m3-effects) forwards;
+}
+.message-row.mine.msg-leaving {
+	transform-origin: right center;
+}
+:root[data-motion="reduced"] .message-row.msg-leaving {
+	animation-duration: 1ms;
+}

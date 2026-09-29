@@ -75,7 +75,7 @@ import { LinkApprovalSheet } from "../components/LinkApprovalSheet"
 import { ScheduledSheet } from "../components/ScheduledSheet"
 import { SafetySheet } from "../components/SafetySheet"
 import { Avatar, Badge, Banner, Button, IconButton, ListGroup, ListItem, Menu, Sheet, SwitchItem, type MenuItemSpec } from "../components/m3"
-import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
+import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall, IChat } from "../components/m3icons"
 import { SearchEngine } from "../lib/search"
 import { useBackgroundAccounts } from "../lib/backgroundAccounts"
 import { syncWebPush } from "../lib/webpush"
@@ -204,6 +204,11 @@ export function Chat() {
 	const [settingsPage, setSettingsPage] = useState<SettingsPageId | null>(null)
 	const [accountMenu, setAccountMenu] = useState<HTMLElement | null>(null)
 	const [headerMenu, setHeaderMenu] = useState<HTMLElement | null>(null)
+	// The menu of a chat in the list (right click / long press), and an action
+	// picked there for a chat that first has to be opened.
+	const [chatMenu, setChatMenu] = useState<{ conversation: Conversation; x: number; y: number } | null>(null)
+	const [pendingChatAction, setPendingChatAction] = useState<{ id: string; key: string } | null>(null)
+	const headerMenuItemsRef = useRef<MenuItemSpec[]>([])
 	const [choice, setChoice] = useState<"mute" | "ttl" | "folders" | null>(null)
 	const [showThreadSearch, setShowThreadSearch] = useState(false)
 	const [safetyOpen, setSafetyOpen] = useState(false)
@@ -1920,6 +1925,15 @@ export function Chat() {
 		return () => { alive = false }
 	}, [activeConversation?.id])
 
+	// An action picked in a chat's menu runs once that chat is the open one.
+	useEffect(() => {
+		if (!pendingChatAction || activeConversation?.id !== pendingChatAction.id) return
+		const key = pendingChatAction.key
+		setPendingChatAction(null)
+		const timer = window.setTimeout(() => headerMenuItemsRef.current.find((item) => item.key === key)?.onSelect(), 60)
+		return () => window.clearTimeout(timer)
+	}, [pendingChatAction, activeConversation?.id])
+
 	// Ctrl/Cmd+K searches everywhere.
 	const globalInputRef = useRef<HTMLInputElement | null>(null)
 	useEffect(() => {
@@ -1970,6 +1984,31 @@ export function Chat() {
 		...(!activeConversation.isSelf ? [{ key: "archive", label: activeConversation.archivedAt ? t("unarchive") : t("archive"), icon: <IStorage size={20} />, onSelect: () => void handleArchive() }] : []),
 		...(directPeer ? [{ key: "remove", label: t("removeFriend"), icon: <ITrash size={20} />, danger: true, onSelect: () => setConfirmRemoveFriend(true) }] : []),
 	] : []
+
+	// What a chat's menu offers when it is not the open one; anything that needs
+	// the chat opens it first and then runs the same action as the ⋮ menu.
+	const chatMenuItems = (conversation: Conversation): MenuItemSpec[] => {
+		if (conversation.id === activeConversation?.id) return headerMenuItems
+		const later = (key: string) => () => {
+			setPendingChatAction({ id: conversation.id, key })
+			setActiveId(conversation.id)
+		}
+		const peer = conversation.kind === "direct" && !conversation.isSelf ? conversation.peer ?? null : null
+		const muted = Boolean(conversation.mutedUntil && new Date(conversation.mutedUntil).getTime() > Date.now())
+		return [
+			{ key: "open", label: t("openChat"), icon: <IChat size={20} />, onSelect: () => setActiveId(conversation.id) },
+			...(!conversation.isSelf && conversation.kind !== "direct" ? [{ key: "members", label: t("members"), icon: <IPeople size={20} />, onSelect: later("members") }] : []),
+			...(peer && !peer.isBot ? [{ key: "safety", label: t("encryptionVerify"), icon: <IShield size={20} />, onSelect: later("safety") }] : []),
+			...(!conversation.isSelf ? [{ key: "mute", label: muted ? t("unmute") : t("notifications"), icon: muted ? <IBell size={20} /> : <IBellOff size={20} />, onSelect: later("mute") }] : []),
+			{ key: "gallery", label: t("galleryOpen"), icon: <IGallery size={20} />, onSelect: later("gallery") },
+			{ key: "folders", label: t("addToFolder"), icon: <IGallery size={20} />, onSelect: later("folders") },
+			...(!conversation.isSelf ? [{ key: "pin", label: pinnedChatSet.has(conversation.id) ? t("unpinChat") : t("pinChat"), icon: <IPin size={20} />, onSelect: () => togglePinChat(conversation.id) }] : []),
+			...(!conversation.isSelf ? [{ key: "archive", label: conversation.archivedAt ? t("unarchive") : t("archive"), icon: <IStorage size={20} />, onSelect: later("archive") }] : []),
+			...(peer ? [{ key: "remove", label: t("removeFriend"), icon: <ITrash size={20} />, danger: true, onSelect: later("remove") }] : []),
+		]
+	}
+
+	headerMenuItemsRef.current = headerMenuItems
 
 	return (
 		<div className={"app-shell" + (activeId ? " has-active" : "")} style={{ "--sidebar-w": String(sidebarWidth) + "px" } as CSSProperties}>
@@ -2040,6 +2079,7 @@ export function Chat() {
 							mentionIds={mentionChats}
 							onlinePeerIds={onlinePeerIds}
 							onSelect={(id) => setActiveId(id)}
+							onContextMenu={(conversation, x, y) => setChatMenu({ conversation, x, y })}
 							emptyLabel={activeFolder ? t("folderEmpty") : t("noChatsYet")}
 						/>
 					</>
@@ -2275,6 +2315,7 @@ export function Chat() {
 			{safetyOpen && directPeer ? <SafetySheet peerName={directPeer.displayName || directPeer.username} peerKey={members.find((member) => member.userId === directPeer.id)?.publicKey ?? null} ownKey={keys.status === "ready" ? keys.session.publicKey : null} onClose={() => setSafetyOpen(false)} /> : null}
 			{accountMenu ? <Menu anchor={accountMenu} items={accountMenuItems} onClose={() => setAccountMenu(null)} align="start" placement="above" /> : null}
 			{headerMenu ? <Menu anchor={headerMenu} items={headerMenuItems} onClose={() => setHeaderMenu(null)} /> : null}
+			{chatMenu ? <Menu anchor={null} point={{ x: chatMenu.x, y: chatMenu.y }} items={chatMenuItems(chatMenu.conversation)} onClose={() => setChatMenu(null)} /> : null}
 			{choice === "mute" && activeConversation ? (
 				<ChoiceSheet
 					title={t("notifications")}

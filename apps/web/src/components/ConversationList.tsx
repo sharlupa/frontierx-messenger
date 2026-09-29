@@ -1,6 +1,7 @@
 import type { Conversation } from "../lib/types"
 import { useSettings } from "../state/settings"
 import { IconBookmark, IconPin, IconBellOff } from "./Icons"
+import { useContextMenuGesture } from "../lib/longpress"
 
 const AVATAR_COLORS = ["#e17076", "#7bc862", "#65aadd", "#a695e7", "#ee7aae", "#6ec9cb", "#f2a45c"]
 
@@ -26,6 +27,7 @@ export function ConversationList({
 	mentionIds,
 	onlinePeerIds,
 	emptyLabel,
+	onContextMenu,
 }: {
 	conversations: Conversation[]
 	activeId: string | null
@@ -35,8 +37,17 @@ export function ConversationList({
 	mentionIds?: string[]
 	onlinePeerIds?: string[]
 	emptyLabel?: string
+	onContextMenu?: (conversation: Conversation, x: number, y: number) => void
 }) {
 	const { t } = useSettings()
+	// Right click, or holding a finger on a chat, opens its menu.
+	const gesture = useContextMenuGesture((x, y, target) => {
+		const item = target?.closest?.("[data-conversation-id]") as HTMLElement | null
+		const conversation = item ? conversations.find((c) => c.id === item.dataset.conversationId) : undefined
+		if (!conversation || !onContextMenu) return false
+		onContextMenu(conversation, x, y)
+		return true
+	})
 	const labelFor = (conversation: Conversation): string => {
 		if (conversation.isSelf) return t("savedMessages")
 		if (conversation.kind === "direct" && conversation.peer) return conversation.peer.displayName || conversation.peer.username
@@ -60,7 +71,7 @@ export function ConversationList({
 	}
 	const now = Date.now()
 	return (
-		<div className="conv-list">
+		<div className="conv-list" {...gesture}>
 			{conversations.map((conversation) => {
 				const count = unread[conversation.id] ?? 0
 				const label = labelFor(conversation)
@@ -76,6 +87,7 @@ export function ConversationList({
 				return (
 					<button
 						key={conversation.id}
+						data-conversation-id={conversation.id}
 						className={"conv-item" + (conversation.id === activeId ? " active" : "")}
 						onClick={() => onSelect(conversation.id)}
 					>
