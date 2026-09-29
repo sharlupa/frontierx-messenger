@@ -2049,3 +2049,7 @@ a.tile:hover .tile-more svg {
 	.btn-lg { min-height: 56px; padding: 0 26px; }
 	.hero-cta .btn { flex: 1 1 100%; }
 }
+
+.nav-links a {
+	white-space: nowrap;
+}
