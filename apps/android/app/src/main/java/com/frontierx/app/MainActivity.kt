@@ -5,6 +5,7 @@ import android.app.Activity
 import android.app.DownloadManager
 import android.content.Intent
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.PowerManager
 import android.provider.Settings
 import android.content.pm.PackageManager
@@ -28,6 +29,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -41,6 +43,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rootView: FrameLayout
     private lateinit var webView: WebView
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+    // Photos and videos come from the system photo picker: quick, a grid of
+    // the gallery, several at once.
+    private lateinit var mediaPickerOne: ActivityResultLauncher<PickVisualMediaRequest>
+    private lateinit var mediaPickerMany: ActivityResultLauncher<PickVisualMediaRequest>
 
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var pendingPermissionRequest: PermissionRequest? = null
@@ -69,16 +75,24 @@ class MainActivity : AppCompatActivity() {
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult()
         ) { result ->
-            val callback = fileChooserCallback
-            fileChooserCallback = null
-            if (callback != null) {
-                val uris = if (result.resultCode == Activity.RESULT_OK) {
-                    WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
+            val uris = if (result.resultCode == Activity.RESULT_OK) {
+                // Several files arrive as ClipData, which parseResult ignores.
+                val clip = result.data?.clipData
+                if (clip != null && clip.itemCount > 0) {
+                    Array(clip.itemCount) { clip.getItemAt(it).uri }
                 } else {
-                    null
+                    WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data)
                 }
-                callback.onReceiveValue(uris)
+            } else {
+                null
             }
+            deliverPicked(uris)
+        }
+        mediaPickerOne = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            deliverPicked(uri?.let { arrayOf(it) })
+        }
+        mediaPickerMany = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { uris ->
+            deliverPicked(uris.toTypedArray())
         }
 
         rootView = FrameLayout(this)
@@ -130,7 +144,9 @@ class MainActivity : AppCompatActivity() {
         settings.allowContentAccess = true
         settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-        WebView.setWebContentsDebuggingEnabled(true)
+        // Remote debugging would let a computer the phone trusts over USB read
+        // the page, keys and decrypted chats included: debug builds only.
+        WebView.setWebContentsDebuggingEnabled((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0)
         webView.addJavascriptInterface(FxDownloads(this), "FrontierXNative")
         webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             startHttpDownload(url, userAgent, contentDisposition, mimeType)
@@ -195,6 +211,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun deliverPicked(uris: Array<Uri>?) {
+        val callback = fileChooserCallback
+        fileChooserCallback = null
+        callback?.onReceiveValue(if (uris.isNullOrEmpty()) null else uris)
+    }
+
     private fun openFileChooser(
         callback: ValueCallback<Array<Uri>>?,
         params: WebChromeClient.FileChooserParams?
@@ -205,10 +227,41 @@ class MainActivity : AppCompatActivity() {
         fileChooserCallback?.onReceiveValue(null)
         fileChooserCallback = callback
 
-        val intent = params?.createIntent()
-        if (intent == null) {
-            fileChooserCallback = null
-            return false
+        val accept = params?.acceptTypes.orEmpty()
+            .flatMap { it.split(",") }
+            .map { it.trim().lowercase() }
+            .filter { it.isNotEmpty() }
+        val multiple = params?.mode == WebChromeClient.FileChooserParams.MODE_OPEN_MULTIPLE
+        val visual = accept.isNotEmpty() && accept.all { it.startsWith("image/") || it.startsWith("video/") }
+
+        // Pictures and videos: the system photo picker.
+        if (visual && params?.isCaptureEnabled != true) {
+            val type = when {
+                accept.all { it.startsWith("image/") } -> ActivityResultContracts.PickVisualMedia.ImageOnly
+                accept.all { it.startsWith("video/") } -> ActivityResultContracts.PickVisualMedia.VideoOnly
+                else -> ActivityResultContracts.PickVisualMedia.ImageAndVideo
+            }
+            val request = PickVisualMediaRequest.Builder().setMediaType(type).build()
+            try {
+                if (multiple) mediaPickerMany.launch(request) else mediaPickerOne.launch(request)
+                return true
+            } catch (_: Exception) {
+                // Falls through to the document picker below.
+            }
+        }
+
+        // Anything else: the document picker, with every accepted type and,
+        // when the page allows it, several files at once. WebView's own
+        // createIntent keeps only the first type and ignores "multiple".
+        val intent = if (params?.isCaptureEnabled == true) {
+            params.createIntent()
+        } else {
+            Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = if (accept.size == 1) accept[0] else "*/*"
+                if (accept.size > 1) putExtra(Intent.EXTRA_MIME_TYPES, accept.toTypedArray())
+                if (multiple) putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            }
         }
         if (intent.type.isNullOrBlank()) {
             intent.type = "*/*"

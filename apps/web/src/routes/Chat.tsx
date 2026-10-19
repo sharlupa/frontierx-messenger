@@ -12,11 +12,14 @@ import type { BotCommand, Conversation, ConversationFolder, ConversationMember, 
 import { ConversationList } from "../components/ConversationList"
 import { MessageThread } from "../components/MessageThread"
 import { Composer, MAX_ATTACHMENT_MB } from "../components/Composer"
-import type { ComposerDraft } from "../components/Composer"
+import type { AttachOptions, ComposerDraft } from "../components/Composer"
 import { useCall } from "../lib/useCall"
-import { CallBar, IncomingCallBanner } from "../components/CallBar"
+import { CallAudio, CallBar, IncomingCallBanner, OngoingCallBar, type CallPerson } from "../components/CallBar"
+import type { MicProblem } from "../lib/webrtc"
 import { encodeMediaMessage, guessMime, isVideoMedia, packFileFromBlob, packImage, parseMediaMessage, unpackFileToBlob, unpackImage, type MediaEnvelope } from "../lib/media"
 import { captureVideoPoster } from "../lib/videothumb"
+import { describeImage, safePreview, thumbnailUrl } from "../lib/imagethumb"
+import { albumOf, newAlbumId, type AlbumRef } from "../lib/album"
 import { voiceExtension, type VoiceRecording } from "../lib/voice"
 import { encodePollMessage, parsePollMessage } from "../lib/poll"
 import { mentionsUser, stripFormatting } from "../lib/richtext"
@@ -27,7 +30,8 @@ import { isOfflineFailure, loadOutbox, newOutboxItem, saveOutbox, type OutboxIte
 import { buildExportHtml, downloadTextFile, safeFileName, type ExportMessage } from "../lib/exportchat"
 import { PollDialog, type PollDraftInput } from "../components/PollDialog"
 
-export type UploadStage = "encrypt" | "upload"
+// "queued": picked with others and waiting for its turn to upload.
+export type UploadStage = "queued" | "encrypt" | "upload"
 
 export type PendingUpload = {
 	id: string
@@ -36,7 +40,13 @@ export type PendingUpload = {
 	size: number
 	stage: UploadStage
 	progress: number
+	// A picture of what is being sent: a small local copy of a photo (an
+	// object URL, revoked when the upload ends) or a video's still frame.
 	poster: string | null
+	ownsPoster?: boolean
+	// Part of an album: shown in its grid while it uploads.
+	album?: AlbumRef
+	caption?: string
 }
 
 function ttlLabel(seconds: number, t: (key: any) => string): string {
@@ -61,6 +71,8 @@ async function resolveMediaUrl(media: MediaEnvelope, onProgress?: (ratio: number
 }
 import { FolderDialog } from "../components/FolderDialog"
 import { GalleryDialog } from "../components/GalleryDialog"
+import { setTabBadge } from "../lib/tabBadge"
+import { ProfileDialog, type ProfileTarget } from "../components/ProfileDialog"
 import { PinnedDialog } from "../components/PinnedDialog"
 import { MediaViewer, type ViewerItem } from "../components/MediaViewer"
 import { FolderTabs } from "../components/FolderTabs"
@@ -74,8 +86,9 @@ import { KeyUnlockSheet } from "../components/KeyUnlockSheet"
 import { LinkApprovalSheet } from "../components/LinkApprovalSheet"
 import { ScheduledSheet } from "../components/ScheduledSheet"
 import { SafetySheet } from "../components/SafetySheet"
+import { BotBadge } from "../components/BotBadge"
 import { Avatar, Badge, Banner, Button, IconButton, ListGroup, ListItem, Menu, Sheet, SwitchItem, type MenuItemSpec } from "../components/m3"
-import { IAdd, IBell, IBellOff, IBot, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
+import { IAdd, IBell, IBellOff, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
 import { SearchEngine } from "../lib/search"
 import { useBackgroundAccounts } from "../lib/backgroundAccounts"
 import { syncWebPush } from "../lib/webpush"
@@ -85,7 +98,7 @@ import { ForwardDialog } from "../components/ForwardDialog"
 import { CommentsDialog, type CommentItem } from "../components/CommentsDialog"
 import { BrandLogo } from "../components/BrandLogo"
 import { useSettings } from "../state/settings"
-import { formatLastSeen, getActiveLang, translate, type StringKey } from "../lib/i18n"
+import { format, formatBytes, formatLastSeen, getActiveLang, translate, type StringKey } from "../lib/i18n"
 import { errorText } from "../lib/errorText"
 import { MorphBlob } from "../components/Expressive"
 
@@ -124,6 +137,16 @@ function ring(): Keyring {
 }
 
 const PAGE_SIZE = 50
+// Files uploading side by side when several are sent at once.
+const UPLOAD_CONCURRENCY = 3
+// What to tell someone whose microphone does not work in a call.
+const MIC_PROBLEM_TEXT: Record<MicProblem, StringKey> = {
+	denied: "callMicDenied",
+	missing: "callMicMissing",
+	busy: "callMicBusy",
+	insecure: "callMicInsecure",
+	unknown: "callMicUnknown",
+}
 const TYPING_TTL_MS = 5000
 const PINNED_CHATS_KEY = "frontierx.pinnedChats"
 const MUTE_FOREVER_MS = 1000 * 60 * 60 * 24 * 365 * 100
@@ -228,6 +251,8 @@ export function Chat() {
 	const [activeId, setActiveId] = useState<string | null>(null)
 	const [rawMessages, setRawMessages] = useState<MessageEnvelope[]>([])
 	const [display, setDisplay] = useState<DisplayMessage[]>([])
+	const displayRef = useRef<DisplayMessage[]>([])
+	displayRef.current = display
 	// Whether messages can be sealed in the open chat right now, and a counter
 	// bumped whenever the keyring learns a key, so locked bubbles re-open.
 	const [keyReady, setKeyReady] = useState(false)
@@ -269,10 +294,14 @@ export function Chat() {
 		return () => { alive = false; window.clearInterval(timer) }
 	}, [])
 	const [showMembers, setShowMembers] = useState(false)
+	// Whose profile is open: a person (from an avatar) or the open group/channel.
+	const [profileTarget, setProfileTarget] = useState<ProfileTarget | null>(null)
 	const [showArchived, setShowArchived] = useState(false)
 	// Attachments in flight, shown in the thread so a long send never looks like
 	// a frozen chat.
 	const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([])
+	const pendingRef = useRef<PendingUpload[]>([])
+	pendingRef.current = pendingUploads
 	const [viewerIndex, setViewerIndex] = useState<number | null>(null)
 	const [showGallery, setShowGallery] = useState(false)
 	const [showPinnedList, setShowPinnedList] = useState(false)
@@ -311,6 +340,8 @@ export function Chat() {
 	const [draftHydratedFor, setDraftHydratedFor] = useState<string | null>(null)
 	const [searchQuery, setSearchQuery] = useState("")
 	const [unread, setUnread] = useState<Record<string, number>>({})
+	// Messages that arrived in the open chat while you were not looking at it.
+	const [awayCount, setAwayCount] = useState(0)
 	const [typingUntil, setTypingUntil] = useState<Record<string, number>>({})
 	const [typingTick, setTypingTick] = useState(0)
 	const [showFriends, setShowFriends] = useState(false)
@@ -341,6 +372,16 @@ export function Chat() {
 
 	const currentUserId = user?.id ?? ""
 	const call = useCall(currentUserId, t("callRefused"))
+	const noteCall = call.noteCall
+	// Whether the chat has a call going on, so it can be joined from there.
+	const refreshChatCall = useCallback((conversationId: string) => {
+		void api.getCall(conversationId).then((res) => noteCall(conversationId, res.call)).catch(() => undefined)
+	}, [noteCall])
+	useEffect(() => {
+		if (activeId) refreshChatCall(activeId)
+	}, [activeId, refreshChatCall])
+	const [callSoundBlocked, setCallSoundBlocked] = useState(false)
+	const [callSwitchTarget, setCallSwitchTarget] = useState<string | null>(null)
 	const [readIds, setReadIds] = useState(new Set() as any)
 	const sentReceiptsRef = useRef(new Set() as any)
 	useEffect(() => {
@@ -625,241 +666,264 @@ export function Chat() {
 		return onOpenConversation((conversationId) => setActiveId(conversationId))
 	}, [])
 
-	useEffect(() => {
-		if (!token) return
-		setToastOpenHandler((id: string) => setActiveId(id))
-		const handle = connectRealtime(token, (event: WsEvent) => {
-			if (
-				event.type === "call.invite" ||
-				event.type === "call.participants" ||
-				event.type === "call.joined" ||
-				event.type === "call.left" ||
-				event.type === "call.ended" ||
-				event.type === "call.signal"
-			) {
-				callHandleRef.current(event)
-				return
-			}
-			
-			if (event.type === "presence.updated") {
-				if (event.lastSeenAt !== undefined) {
-					setLastSeen((previous) => {
-						const next = { ...previous }
-						if (event.lastSeenAt) next[event.userId] = event.lastSeenAt
-						else delete next[event.userId]
-						return next
-					})
-				}
-				setOnlinePeerIds((previous) => {
-					if (event.online) return previous.includes(event.userId) ? previous : previous.concat(event.userId)
-					return previous.filter((userId) => userId !== event.userId)
-				})
-				if (event.conversationId !== activeIdRef.current) return
-				setOnlineUserIds((previous) => {
-					if (event.online) return previous.includes(event.userId) ? previous : previous.concat(event.userId)
-					return previous.filter((userId) => userId !== event.userId)
-				})
-				return
-			}
-			if (event.type === "bot.callback_answer") {
-				const waiting = callbackWaiters.current.get(event.callbackId)
-				callbackWaiters.current.delete(event.callbackId)
-				waiting?.()
-				if (event.text) {
-					const botName = membersRef.current.find((m) => m.userId === event.botId)?.displayName ?? "FrontierX"
-					void (async () => {
-						let text = t("messageEncrypted")
-						try {
-							text = stripFormatting(await ring().decrypt(event.conversationId, event.text as string))
-						} catch {
-							// shown as an encrypted notice
-						}
-						if (event.alert) window.alert(text)
-						else pushToast({ title: botName, body: text.slice(0, 300) })
-					})()
-				}
-				return
-			}
-			if (event.type === "conversation.muted") { if(event.userId===currentUserId) setConversations((prev)=>prev.map((c)=>c.id===event.conversationId?{...c,mutedUntil:event.mutedUntil}:c)); return }
-			if (event.type === "friend.request") { void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {}); return }
-			if (event.type === "group.invite") { setGroupInvites((prev) => prev.some((gi) => gi.id === event.invite.id) ? prev : [event.invite, ...prev]); return }
-			if (event.type === "friend.accepted") { setConversations((prev)=>prev.some((c)=>c.id===event.conversation.id)?prev:[event.conversation,...prev]); setActiveId(event.conversation.id); return }
-			if (event.type === "friend.removed") { setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId)); if (activeIdRef.current === event.conversationId) setActiveId(null); if (event.by !== currentUserId) window.alert(t("youWereRemoved")); return }
-			if (event.type === "conversation.added") { setConversations((prev)=>prev.some((c)=>c.id===event.conversation.id)?prev:[event.conversation,...prev]); return }
-			if (event.type === "conversation.deleted") { setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId)); if (activeIdRef.current === event.conversationId) setActiveId(null); return }
-			if (event.type === "member.added" || event.type === "member.removed") {
-				activeKeyring()?.onMembershipChanged(event.conversationId)
-				if (event.conversationId === activeIdRef.current) void api.getConversationMembers(event.conversationId).then((res) => setMembers(res.members)).catch(() => undefined)
-				return
-			}
-			if (event.type === "keys.shares_needed") { activeKeyring()?.onSharesNeeded(event.conversationId); return }
-			if (event.type === "keys.link_requested") { if (activeKeyring()) setLinkRequest(event.request); return }
-			if (event.type === "keys.link_resolved") { setLinkRequest((current) => (current && current.id === event.id ? null : current)); return }
-			if (event.type === "keys.account_reset") { void revalidateKeys(); return }
-			if (event.type === "keys.shares_added") { activeKeyring()?.onSharesAdded(event.conversationId); return }
-			if (event.type === "keys.epoch_created") { activeKeyring()?.onEpochCreated(event.conversationId, event.keyId); return }
-			if (event.type === "scheduled.updated") { setConversations((prev) => prev.map((c) => c.id === event.conversationId ? { ...c, scheduledCount: event.count } : c)); if (event.conversationId === activeIdRef.current) setScheduledVersion((value) => value + 1); return }
-			if (event.type === "conversation.profile_updated") { setConversations((prev)=>prev.map((c)=>c.id===event.conversationId?{...c,title:event.title,avatar:event.avatar}:c)); return }
-			if (event.type === "user.profile_updated") { setMembers((prev)=>prev.map((m)=>m.userId===event.userId?{...m,displayName:event.displayName,avatar:event.avatar}:m)); setConversations((prev)=>prev.map((c)=>c.peer&&c.peer.id===event.userId?{...c,peer:{...c.peer,displayName:event.displayName,avatar:event.avatar}}:c)); return }
-			if (event.type === "poll.updated") { if(event.conversationId!==activeIdRef.current) return; setPolls((previous)=>{ const known=previous.some((poll)=>poll.messageId===event.update.messageId); if(!known) { void refreshPolls(event.conversationId).catch(()=>undefined); return previous } return previous.map((poll)=>poll.messageId===event.update.messageId?{...poll,optionCounts:event.update.optionCounts,totalVoters:event.update.totalVoters,closedAt:event.update.closedAt}:poll) }); return }
-			if (event.type === "receipt.updated") {
-				if (event.state !== "read") return
-				const readMessageId = event.messageId
-				setReadIds((prev: any) => {
-					if (prev.has(readMessageId)) return prev
-					const next = new Set(prev)
-					next.add(readMessageId)
+	// Realtime events go to the handler of the latest render, so it always sees
+	// the current state, while the socket stays open for the whole session.
+	// Reopening it whenever that state changed (switching chats, editing a
+	// message) made the server think the user had gone and drop their call.
+	const realtimeHandlerRef = useRef<(event: WsEvent) => void>(() => undefined)
+	realtimeHandlerRef.current = (event: WsEvent) => {
+		if (
+			event.type === "call.invite" ||
+			event.type === "call.participants" ||
+			event.type === "call.joined" ||
+			event.type === "call.left" ||
+			event.type === "call.ended" ||
+			event.type === "call.signal" ||
+			event.type === "call.mute"
+		) {
+			callHandleRef.current(event)
+			return
+		}
+		
+		if (event.type === "presence.updated") {
+			if (event.lastSeenAt !== undefined) {
+				setLastSeen((previous) => {
+					const next = { ...previous }
+					if (event.lastSeenAt) next[event.userId] = event.lastSeenAt
+					else delete next[event.userId]
 					return next
 				})
-				return
 			}
-			if (event.type === "message.created") {
-				const message = event.message
-				// A message that names you is worth marking even in a busy chat.
-				if (message.senderId !== currentUserId && message.conversationId !== activeIdRef.current && user?.username) {
-					const keyring = activeKeyring()
-					if (keyring) {
-						void keyring.decrypt(message.conversationId, message.ciphertext)
-							.then((text) => {
-								if (!parseMediaMessage(text) && mentionsUser(text, user.username)) {
-									setMentionChats((prev) => prev.includes(message.conversationId) ? prev : prev.concat([message.conversationId]))
-								}
-							})
-							.catch(() => undefined)
+			setOnlinePeerIds((previous) => {
+				if (event.online) return previous.includes(event.userId) ? previous : previous.concat(event.userId)
+				return previous.filter((userId) => userId !== event.userId)
+			})
+			if (event.conversationId !== activeIdRef.current) return
+			setOnlineUserIds((previous) => {
+				if (event.online) return previous.includes(event.userId) ? previous : previous.concat(event.userId)
+				return previous.filter((userId) => userId !== event.userId)
+			})
+			return
+		}
+		if (event.type === "bot.callback_answer") {
+			const waiting = callbackWaiters.current.get(event.callbackId)
+			callbackWaiters.current.delete(event.callbackId)
+			waiting?.()
+			if (event.text) {
+				const botName = membersRef.current.find((m) => m.userId === event.botId)?.displayName ?? "FrontierX"
+				void (async () => {
+					let text = t("messageEncrypted")
+					try {
+						text = stripFormatting(await ring().decrypt(event.conversationId, event.text as string))
+					} catch {
+						// shown as an encrypted notice
 					}
+					if (event.alert) window.alert(text)
+					else pushToast({ title: botName, body: text.slice(0, 300) })
+				})()
+			}
+			return
+		}
+		if (event.type === "conversation.muted") { if(event.userId===currentUserId) setConversations((prev)=>prev.map((c)=>c.id===event.conversationId?{...c,mutedUntil:event.mutedUntil}:c)); return }
+		if (event.type === "friend.request") { void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {}); return }
+		if (event.type === "group.invite") { setGroupInvites((prev) => prev.some((gi) => gi.id === event.invite.id) ? prev : [event.invite, ...prev]); return }
+		if (event.type === "friend.accepted") { setConversations((prev)=>prev.some((c)=>c.id===event.conversation.id)?prev:[event.conversation,...prev]); setActiveId(event.conversation.id); return }
+		if (event.type === "friend.removed") { setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId)); if (activeIdRef.current === event.conversationId) setActiveId(null); if (event.by !== currentUserId) window.alert(t("youWereRemoved")); return }
+		if (event.type === "conversation.added") { setConversations((prev)=>prev.some((c)=>c.id===event.conversation.id)?prev:[event.conversation,...prev]); return }
+		if (event.type === "conversation.deleted") {
+			const gone = conversationsRef.current.find((c) => c.id === event.conversationId)
+			setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId))
+			if (activeIdRef.current === event.conversationId) setActiveId(null)
+			if (call.activeConversationId === event.conversationId) void call.leave()
+			// Taken out by a moderator (rather than the chat being deleted or left
+			// on another device): say so, the chat just vanished otherwise.
+			if (event.removedBy) pushToast({ title: event.title || (gone ? convTitle(gone) : t("kindGroup")), body: t("removedFromChat") })
+			return
+		}
+		if (event.type === "member.added" || event.type === "member.removed") {
+			activeKeyring()?.onMembershipChanged(event.conversationId)
+			if (event.conversationId === activeIdRef.current) void api.getConversationMembers(event.conversationId).then((res) => setMembers(res.members)).catch(() => undefined)
+			return
+		}
+		if (event.type === "keys.shares_needed") { activeKeyring()?.onSharesNeeded(event.conversationId); return }
+		if (event.type === "keys.link_requested") { if (activeKeyring()) setLinkRequest(event.request); return }
+		if (event.type === "keys.link_resolved") { setLinkRequest((current) => (current && current.id === event.id ? null : current)); return }
+		if (event.type === "keys.account_reset") { void revalidateKeys(); return }
+		if (event.type === "keys.shares_added") { activeKeyring()?.onSharesAdded(event.conversationId); return }
+		if (event.type === "keys.epoch_created") { activeKeyring()?.onEpochCreated(event.conversationId, event.keyId); return }
+		if (event.type === "scheduled.updated") { setConversations((prev) => prev.map((c) => c.id === event.conversationId ? { ...c, scheduledCount: event.count } : c)); if (event.conversationId === activeIdRef.current) setScheduledVersion((value) => value + 1); return }
+		if (event.type === "conversation.profile_updated") { setConversations((prev)=>prev.map((c)=>c.id===event.conversationId?{...c,title:event.title,avatar:event.avatar,description:event.description ?? null}:c)); return }
+		if (event.type === "user.profile_updated") { setMembers((prev)=>prev.map((m)=>m.userId===event.userId?{...m,displayName:event.displayName,avatar:event.avatar}:m)); setConversations((prev)=>prev.map((c)=>c.peer&&c.peer.id===event.userId?{...c,peer:{...c.peer,displayName:event.displayName,avatar:event.avatar}}:c)); return }
+		if (event.type === "poll.updated") { if(event.conversationId!==activeIdRef.current) return; setPolls((previous)=>{ const known=previous.some((poll)=>poll.messageId===event.update.messageId); if(!known) { void refreshPolls(event.conversationId).catch(()=>undefined); return previous } return previous.map((poll)=>poll.messageId===event.update.messageId?{...poll,optionCounts:event.update.optionCounts,totalVoters:event.update.totalVoters,closedAt:event.update.closedAt}:poll) }); return }
+		if (event.type === "receipt.updated") {
+			if (event.state !== "read") return
+			const readMessageId = event.messageId
+			setReadIds((prev: any) => {
+				if (prev.has(readMessageId)) return prev
+				const next = new Set(prev)
+				next.add(readMessageId)
+				return next
+			})
+			return
+		}
+		if (event.type === "message.created") {
+			const message = event.message
+			// A message that names you is worth marking even in a busy chat.
+			if (message.senderId !== currentUserId && message.conversationId !== activeIdRef.current && user?.username) {
+				const keyring = activeKeyring()
+				if (keyring) {
+					void keyring.decrypt(message.conversationId, message.ciphertext)
+						.then((text) => {
+							if (!parseMediaMessage(text) && mentionsUser(text, user.username)) {
+								setMentionChats((prev) => prev.includes(message.conversationId) ? prev : prev.concat([message.conversationId]))
+							}
+						})
+						.catch(() => undefined)
 				}
+			}
+			if (message.senderId !== currentUserId) {
+				const conv = conversationsRef.current.find((item) => item.id === message.conversationId)
+				const chatMuted = Boolean(message.silent) || Boolean(conv && conv.mutedUntil && new Date(conv.mutedUntil).getTime() > Date.now())
+				if (!chatMuted) playMessageSound()
+				if (!chatMuted && message.conversationId === activeIdRef.current && (document.hidden || !document.hasFocus())) setAwayCount((count) => count + 1)
+				if (!chatMuted && (message.conversationId !== activeIdRef.current || document.hidden)) {
+					const cv: any = conv
+					const title = (cv && cv.title) || (cv && cv.peer && (cv.peer.displayName || cv.peer.username)) || t("notifNewMessage")
+					if (!isPhoneViewport()) void toastBody(message, t("messageEncrypted"), t("notifAttachment"), t("notifPoll"), t("voiceMessage")).then((body) => pushToast({ title, body, conversationId: message.conversationId }))
+				}
+			}
+			void searchEngineRef.current?.addLive(message)
+			if (message.conversationId !== activeIdRef.current) {
+				// Your own message from another device is not news.
 				if (message.senderId !== currentUserId) {
-					const conv = conversationsRef.current.find((item) => item.id === message.conversationId)
-					const chatMuted = Boolean(message.silent) || Boolean(conv && conv.mutedUntil && new Date(conv.mutedUntil).getTime() > Date.now())
-					if (!chatMuted) playMessageSound()
-					if (!chatMuted && (message.conversationId !== activeIdRef.current || document.hidden)) {
-						const cv: any = conv
-						const title = (cv && cv.title) || (cv && cv.peer && (cv.peer.displayName || cv.peer.username)) || t("notifNewMessage")
-						if (!isPhoneViewport()) void toastBody(message, t("messageEncrypted"), t("notifAttachment"), t("notifPoll"), t("voiceMessage")).then((body) => pushToast({ title, body, conversationId: message.conversationId }))
-					}
-				}
-				void searchEngineRef.current?.addLive(message)
-				if (message.conversationId !== activeIdRef.current) {
 					setUnread((prev) => {
 						const next = { ...prev }
 						next[message.conversationId] = (next[message.conversationId] ?? 0) + 1
 						return next
 					})
-					return
 				}
-				if (hasNewerRef.current) return
-				setRawMessages((prev) => {
-					if (prev.some((m) => m.id === message.id)) return prev
-					return [...prev, message]
-				})
 				return
 			}
-			if (event.type === "message.updated") {
-				const updated = event.message
-				if (updated.conversationId !== activeIdRef.current) return
-				setRawMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
-				return
-			}
-			if (event.type === "message.deleted") {
-				if (event.conversationId !== activeIdRef.current) return
-				const removedId = event.messageId
-				const at = new Date().toISOString()
-				setRawMessages((prev) =>
-					prev.map((m) => (m.id === removedId ? { ...m, ciphertext: "", deletedAt: at } : m)),
+			if (hasNewerRef.current) return
+			setRawMessages((prev) => {
+				if (prev.some((m) => m.id === message.id)) return prev
+				return [...prev, message]
+			})
+			return
+		}
+		if (event.type === "message.updated") {
+			const updated = event.message
+			if (updated.conversationId !== activeIdRef.current) return
+			setRawMessages((prev) => prev.map((m) => (m.id === updated.id ? updated : m)))
+			return
+		}
+		if (event.type === "message.deleted") {
+			if (event.conversationId !== activeIdRef.current) return
+			const removedId = event.messageId
+			const at = new Date().toISOString()
+			setRawMessages((prev) =>
+				prev.map((m) => (m.id === removedId ? { ...m, ciphertext: "", deletedAt: at } : m)),
+			)
+			setPinned((prev) => prev.filter((item) => item.messageId !== removedId))
+			setPolls((prev) => prev.filter((poll) => poll.messageId !== removedId))
+			return
+		}
+		if (event.type === "typing") {
+			if (event.conversationId !== activeIdRef.current) return
+			const who = event.userId
+			setTypingUntil((prev) => {
+				const next = { ...prev }
+				next[who] = Date.now() + TYPING_TTL_MS
+				return next
+			})
+			return
+		}
+		if (event.type === "reaction.updated") {
+			if (event.conversationId !== activeIdRef.current) return
+			const changed = event
+			setReactions((prev) => {
+				const rest = prev.filter(
+					(r) =>
+						r.messageId !== changed.messageId ||
+						r.userId !== changed.userId ||
+						r.emoji !== changed.emoji,
 				)
-				setPinned((prev) => prev.filter((item) => item.messageId !== removedId))
-				setPolls((prev) => prev.filter((poll) => poll.messageId !== removedId))
-				return
-			}
-			if (event.type === "typing") {
-				if (event.conversationId !== activeIdRef.current) return
-				const who = event.userId
-				setTypingUntil((prev) => {
-					const next = { ...prev }
-					next[who] = Date.now() + TYPING_TTL_MS
-					return next
+				if (!changed.active) return rest
+				return rest.concat([
+					{
+						messageId: changed.messageId,
+						userId: changed.userId,
+						emoji: changed.emoji,
+						at: new Date().toISOString(),
+					},
+				])
+			})
+			return
+		}
+		if (event.type === "message.pinned") {
+			if (event.conversationId !== activeIdRef.current) return
+			setPinned((prev) => {
+				const rest = prev.filter((item) => item.messageId !== event.messageId)
+				return event.active && event.pinnedAt ? rest.concat([{ conversationId: event.conversationId, messageId: event.messageId, pinnedBy: event.pinnedBy, pinnedAt: event.pinnedAt }]) : rest
+			})
+			return
+		}
+		if (event.type === "member.role_changed") {
+			if (event.conversationId !== activeIdRef.current) return
+			setMembers((prev) => prev.map((member) => member.userId === event.userId ? { ...member, role: event.role } : member))
+			return
+		}
+		if (event.type === "folder.updated") {
+			if (event.userId !== currentUserId) return
+			void refreshFolders().catch(() => undefined)
+			return
+		}
+		if (event.type === "conversation.ttl_changed") {
+			setConversations((prev) => prev.map((item) => item.id === event.conversationId ? { ...item, ttlSeconds: event.ttlSeconds } : item))
+			return
+		}
+		if (event.type === "conversation.state_changed") {
+			if (event.userId !== currentUserId) return
+			setConversations((prev) => prev.map((conversation) => conversation.id === event.conversationId ? { ...conversation, archivedAt: event.archivedAt } : conversation))
+			return
+		}
+		if (event.type === "draft.updated") {
+			if (event.conversationId !== activeIdRef.current || event.userId !== currentUserId || draft.editingId || !keyReady) return
+			void (async () => {
+				try {
+					const incoming = event.ciphertext ? await ring().decrypt(event.conversationId, event.ciphertext) : ""
+					// Our own save echoed back, or the user is still typing: keep the field.
+					if (incoming === lastSavedDraftRef.current) return
+					if (typingRecently(event.conversationId, 6000)) return
+					setComposerValue(incoming)
+					setDraftHydratedFor(event.conversationId)
+				} catch {}
+			})()
+			return
+		}
+		if (event.type === "ready") {
+			const current = activeIdRef.current
+			void activeKeyring()?.syncPending().catch(() => undefined)
+			// Call events missed while the connection was away.
+			call.resync()
+			if (current) refreshChatCall(current)
+			if (!current || hasNewerRef.current) return
+			void api.getConversationPresence(current).then((res) => { setOnlineUserIds(res.onlineUserIds); mergeLastSeen(res.lastSeen) }).catch(() => undefined)
+			void api
+				.listMessages(current, { limit: PAGE_SIZE })
+				.then((res) => {
+					setRawMessages(res.messages)
+					setHasMore(res.hasMore)
 				})
-				return
-			}
-			if (event.type === "reaction.updated") {
-				if (event.conversationId !== activeIdRef.current) return
-				const changed = event
-				setReactions((prev) => {
-					const rest = prev.filter(
-						(r) =>
-							r.messageId !== changed.messageId ||
-							r.userId !== changed.userId ||
-							r.emoji !== changed.emoji,
-					)
-					if (!changed.active) return rest
-					return rest.concat([
-						{
-							messageId: changed.messageId,
-							userId: changed.userId,
-							emoji: changed.emoji,
-							at: new Date().toISOString(),
-						},
-					])
-				})
-				return
-			}
-			if (event.type === "message.pinned") {
-				if (event.conversationId !== activeIdRef.current) return
-				setPinned((prev) => {
-					const rest = prev.filter((item) => item.messageId !== event.messageId)
-					return event.active && event.pinnedAt ? rest.concat([{ conversationId: event.conversationId, messageId: event.messageId, pinnedBy: event.pinnedBy, pinnedAt: event.pinnedAt }]) : rest
-				})
-				return
-			}
-			if (event.type === "member.role_changed") {
-				if (event.conversationId !== activeIdRef.current) return
-				setMembers((prev) => prev.map((member) => member.userId === event.userId ? { ...member, role: event.role } : member))
-				return
-			}
-			if (event.type === "folder.updated") {
-				if (event.userId !== currentUserId) return
-				void refreshFolders().catch(() => undefined)
-				return
-			}
-			if (event.type === "conversation.ttl_changed") {
-				setConversations((prev) => prev.map((item) => item.id === event.conversationId ? { ...item, ttlSeconds: event.ttlSeconds } : item))
-				return
-			}
-			if (event.type === "conversation.state_changed") {
-				if (event.userId !== currentUserId) return
-				setConversations((prev) => prev.map((conversation) => conversation.id === event.conversationId ? { ...conversation, archivedAt: event.archivedAt } : conversation))
-				return
-			}
-			if (event.type === "draft.updated") {
-				if (event.conversationId !== activeIdRef.current || event.userId !== currentUserId || draft.editingId || !keyReady) return
-				void (async () => {
-					try {
-						const incoming = event.ciphertext ? await ring().decrypt(event.conversationId, event.ciphertext) : ""
-						// Our own save echoed back, or the user is still typing: keep the field.
-						if (incoming === lastSavedDraftRef.current) return
-						if (typingRecently(event.conversationId, 6000)) return
-						setComposerValue(incoming)
-						setDraftHydratedFor(event.conversationId)
-					} catch {}
-				})()
-				return
-			}
-			if (event.type === "ready") {
-				const current = activeIdRef.current
-				void activeKeyring()?.syncPending().catch(() => undefined)
-				if (!current || hasNewerRef.current) return
-				void api.getConversationPresence(current).then((res) => { setOnlineUserIds(res.onlineUserIds); mergeLastSeen(res.lastSeen) }).catch(() => undefined)
-				void api
-					.listMessages(current, { limit: PAGE_SIZE })
-					.then((res) => {
-						setRawMessages(res.messages)
-						setHasMore(res.hasMore)
-					})
-					.catch(() => undefined)
-			}
-		})
+				.catch(() => undefined)
+		}
+	}
+	useEffect(() => {
+		if (!token) return
+		setToastOpenHandler((id: string) => setActiveId(id))
+		const handle = connectRealtime(token, (event: WsEvent) => realtimeHandlerRef.current(event))
 		return () => handle.close()
-	}, [token, keyReady, draft.editingId, currentUserId, refreshPolls, refreshFolders])
+	}, [token])
 
 	useEffect(() => {
 		if (!call.incoming) return
@@ -953,6 +1017,33 @@ export function Chat() {
 		}
 	}, [])
 
+	// From older history (opened at a search hit) back to the latest messages.
+	const showLatest = useCallback(() => {
+		const conversationId = activeIdRef.current
+		if (!conversationId) return
+		setLoadingNewer(true)
+		void api
+			.listMessages(conversationId, { limit: PAGE_SIZE })
+			.then((res) => {
+				if (activeIdRef.current !== conversationId) return
+				setRawMessages(res.messages)
+				setHasMore(res.hasMore)
+				setHasNewer(false)
+			})
+			.catch((err) => setError(errMessage(err, tt("loadMessagesFailed"))))
+			.finally(() => setLoadingNewer(false))
+	}, [])
+
+	// Sending from here brings the chat to its latest messages: the thread
+	// scrolls to its end (and older history opened at a search hit gives way
+	// to the latest page). Scheduled messages do not show in the chat yet.
+	const [sentAt, setSentAt] = useState(0)
+	const noteSent = useCallback((conversationId: string, options?: SendOptions) => {
+		if (options?.sendAt || conversationId !== activeIdRef.current) return
+		if (hasNewerRef.current) showLatest()
+		setSentAt(Date.now())
+	}, [showLatest])
+
 	const appendMessage = useCallback((message: MessageEnvelope | null) => {
 		if (!message || message.conversationId !== activeIdRef.current) return
 		setRawMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
@@ -978,6 +1069,7 @@ export function Chat() {
 			const conversationId = activeIdRef.current
 			if (!conversationId || !keyReady) return
 			setError(null)
+			noteSent(conversationId, options)
 			try {
 				const card = await buildLinkCard(body)
 				const payload = card ? encodeLinkMessage({ text: body, preview: card }) : body
@@ -1001,7 +1093,7 @@ export function Chat() {
 				setError(errMessage(err, tt("sendMessageFailed")))
 			}
 		},
-		[keyReady, appendMessage, deliverSealed, t],
+		[keyReady, appendMessage, deliverSealed, noteSent, t],
 	)
 
 	// File names and types are sealed with the conversation key before they
@@ -1022,7 +1114,9 @@ export function Chat() {
 
 	// Attachment path: encrypt straight into a Blob and upload it with progress,
 	// so neither memory nor the user's patience depends on the file size.
-	const sendMediaFile = useCallback(async (
+	// Encrypts and uploads; the message that points at the file is sent
+	// separately, so several files can upload at once and still appear in order.
+	const uploadMediaFile = useCallback(async (
 		conversationId: string,
 		name: string,
 		mime: string,
@@ -1030,32 +1124,44 @@ export function Chat() {
 		caption: string | undefined,
 		extra: Partial<MediaEnvelope> | undefined,
 		onProgress: (stage: UploadStage, ratio: number) => void,
-		options: SendOptions = {},
-	): Promise<MessageEnvelope | null> => {
+	): Promise<MediaEnvelope> => {
 		const { sealedName, sealedMime } = await sealFileMeta(conversationId, name, mime)
 		const created = await api.createFile({ conversationId, name: sealedName, mime: sealedMime, size: file.size })
 		const packed = await packFileFromBlob(created.asset.id, name, mime, file, extra, (ratio) => onProgress("encrypt", ratio))
 		if (caption) packed.envelope.caption = caption
 		await api.uploadFileBlob(created.asset.id, packed.blob, (ratio) => onProgress("upload", ratio))
-		return deliverSealed(conversationId, encodeMediaMessage(packed.envelope), options)
-	}, [sealFileMeta, deliverSealed])
+		return packed.envelope
+	}, [sealFileMeta])
 
-	const handleAttach = useCallback(
-		async (file: File, caption: string, options: SendOptions & { spoiler?: boolean } = {}) => {
-			const conversationId = activeIdRef.current
-			if (!conversationId || !keyReady) return
+	// Files from the clipboard or a share sheet can come unnamed, and an empty
+	// name breaks the upload, so a fallback name is made up.
+	const attachmentName = (file: File): string => {
+		if (file.name && file.name.trim()) return file.name
+		const mime = file.type || "application/octet-stream"
+		return "file-" + String(Date.now()) + (mime.indexOf("image/") === 0 ? "." + mime.slice(6).split("+")[0] : "")
+	}
+	const dropPending = useCallback((pendingId: string) => {
+		setPendingUploads((prev) => {
+			const gone = prev.find((item) => item.id === pendingId)
+			if (gone?.ownsPoster && gone.poster) URL.revokeObjectURL(gone.poster)
+			return prev.filter((item) => item.id !== pendingId)
+		})
+	}, [])
+
+	// Everything before the message itself: checks, the upload card, preview
+	// data for photos and videos, encryption and upload. Gives back the step
+	// that sends the message, or null if the file could not go.
+	const prepareAttachment = useCallback(
+		async (conversationId: string, file: File, caption: string, options: AttachOptions, pendingId: string): Promise<(() => Promise<void>) | null> => {
+			const done = () => dropPending(pendingId)
 			if (file.size > MAX_ATTACHMENT_MB * 1024 * 1024) {
-				setError(t("fileTooLarge") + " " + String(MAX_ATTACHMENT_MB) + " MB")
-				return
+				setError(t("fileTooLarge") + " " + formatBytes(lang, MAX_ATTACHMENT_MB * 1024 * 1024))
+				done()
+				return null
 			}
-			setError(null)
-			// Files from the clipboard or a share sheet can reach here unnamed, and an
-			// empty name breaks the upload, so a fallback name is generated.
-			const rawMime = file.type || "application/octet-stream"
-			const safeName = file.name && file.name.trim() ? file.name : "file-" + String(Date.now()) + (rawMime.indexOf("image/") === 0 ? "." + rawMime.slice(6).split("+")[0] : "")
-			const mime = guessMime(safeName, rawMime)
-			const pendingId = "upload-" + String(Date.now()) + "-" + String(Math.round(Math.random() * 1e6))
-			setPendingUploads((prev) => prev.concat([{ id: pendingId, conversationId, name: safeName, size: file.size, stage: "encrypt", progress: 0, poster: null }]))
+			const safeName = attachmentName(file)
+			const mime = guessMime(safeName, file.type || "application/octet-stream")
+			setPendingUploads((prev) => prev.map((item) => item.id === pendingId ? { ...item, stage: "encrypt" } : item))
 			// Progress fires per chunk; only whole percents reach React.
 			let lastShown = -1
 			const report = (stage: UploadStage, ratio: number) => {
@@ -1068,7 +1174,7 @@ export function Chat() {
 			try {
 				// A video carries a still frame and its length in the envelope, so the
 				// bubble shows a real preview before the file is downloaded.
-				let extra: Partial<MediaEnvelope> | undefined = options.spoiler ? { spoiler: true } : undefined
+				let extra: Partial<MediaEnvelope> | undefined = options.spoiler || options.album ? { ...(options.spoiler ? { spoiler: true } : {}), ...(options.album ? { album: options.album } : {}) } : undefined
 				if (mime.indexOf("video/") === 0) {
 					const shot = await captureVideoPoster(file)
 					extra = {
@@ -1078,22 +1184,103 @@ export function Chat() {
 						width: shot.width ?? undefined,
 						height: shot.height ?? undefined,
 					}
-					if (shot.poster) setPendingUploads((prev) => prev.map((item) => item.id === pendingId ? { ...item, poster: shot.poster } : item))
+					if (shot.poster) setPendingUploads((prev) => prev.map((item) => {
+						if (item.id !== pendingId) return item
+						if (item.ownsPoster && item.poster) URL.revokeObjectURL(item.poster)
+						return { ...item, poster: shot.poster, ownsPoster: false }
+					}))
+				} else if (mime.indexOf("image/") === 0 && mime !== "image/svg+xml") {
+					// A photo carries its size and a tiny blurred preview the same way.
+					const info = await describeImage(file)
+					extra = { ...(extra ?? {}), width: info.width ?? undefined, height: info.height ?? undefined, poster: info.poster ?? undefined }
 				}
-				appendMessage(await sendMediaFile(conversationId, safeName, mime, file, caption || undefined, extra, report, options))
+				const envelope = await uploadMediaFile(conversationId, safeName, mime, file, caption || undefined, extra, report)
+				return async () => {
+					try {
+						appendMessage(await deliverSealed(conversationId, encodeMediaMessage(envelope), options))
+					} catch (err) {
+						setError(errMessage(err, t("sendFileFailed")))
+					} finally {
+						done()
+					}
+				}
 			} catch (err) {
 				setError(errMessage(err, t("sendFileFailed")))
-			} finally {
-				setPendingUploads((prev) => prev.filter((item) => item.id !== pendingId))
+				done()
+				return null
 			}
 		},
-		[keyReady, t, sendMediaFile, appendMessage],
+		[t, lang, uploadMediaFile, deliverSealed, appendMessage, dropPending],
+	)
+
+	// Several files at once: up to UPLOAD_CONCURRENCY upload side by side, and
+	// their messages go out strictly in the order they were picked, so an
+	// album stays together and in order.
+	const handleAttachFiles = useCallback(
+		async (items: Array<{ file: File; caption: string; options?: AttachOptions }>) => {
+			const conversationId = activeIdRef.current
+			if (!conversationId || !keyReady || items.length === 0) return
+			setError(null)
+			noteSent(conversationId, items[0].options)
+			// Every file shows in the chat at once (an album already as its grid),
+			// waiting for its turn, with a small picture of a photo.
+			const stamp = String(Date.now())
+			const entries: PendingUpload[] = items.map((item, index) => ({
+				id: "upload-" + stamp + "-" + String(index) + "-" + String(Math.round(Math.random() * 1e6)),
+				conversationId,
+				name: attachmentName(item.file),
+				size: item.file.size,
+				stage: "queued",
+				progress: 0,
+				poster: null,
+				album: item.options?.album,
+				caption: item.caption || undefined,
+			}))
+			setPendingUploads((prev) => prev.concat(entries))
+			void (async () => {
+				for (const [index, item] of items.entries()) {
+					if (guessMime(entries[index].name, item.file.type).indexOf("image/") !== 0) continue
+					const thumb = await thumbnailUrl(item.file)
+					if (!thumb) continue
+					// The upload may already be over; the copy is then not needed.
+					if (!pendingRef.current.some((entry) => entry.id === entries[index].id && !entry.poster)) {
+						URL.revokeObjectURL(thumb)
+						continue
+					}
+					setPendingUploads((prev) => prev.map((entry) => (entry.id === entries[index].id && !entry.poster ? { ...entry, poster: thumb, ownsPoster: true } : entry)))
+				}
+			})()
+			let running = 0
+			const waiting: Array<() => void> = []
+			const slot = async (): Promise<void> => {
+				if (running >= UPLOAD_CONCURRENCY) await new Promise<void>((resolve) => waiting.push(resolve))
+				running += 1
+			}
+			const release = () => {
+				running -= 1
+				waiting.shift()?.()
+			}
+			const prepared = items.map(async (item, index) => {
+				await slot()
+				try {
+					return await prepareAttachment(conversationId, item.file, item.caption, item.options ?? {}, entries[index].id)
+				} finally {
+					release()
+				}
+			})
+			for (const pending of prepared) {
+				const deliver = await pending
+				if (deliver) await deliver()
+			}
+		},
+		[keyReady, prepareAttachment, noteSent],
 	)
 
 	const handleSendVoice = useCallback(async (recording: VoiceRecording, options: SendOptions = {}) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId || !keyReady) return
 		setError(null)
+		noteSent(conversationId, options)
 		try {
 			const name = "voice-" + String(Date.now()) + "." + voiceExtension(recording.mime)
 			appendMessage(await sendMediaBytes(conversationId, name, recording.mime, recording.bytes, undefined, {
@@ -1104,24 +1291,26 @@ export function Chat() {
 		} catch (err) {
 			setError(errMessage(err, tt("sendVoiceFailed")))
 		}
-	}, [keyReady, sendMediaBytes, appendMessage])
+	}, [keyReady, sendMediaBytes, appendMessage, noteSent])
 
 	const handleSendSticker = useCallback(async (sticker: Sticker) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId || !keyReady) return
 		setError(null)
+		noteSent(conversationId)
 		try {
 			const { bytes, mime } = dataUrlToBytes(sticker.data)
 			appendMessage(await sendMediaBytes(conversationId, "sticker", mime || "image/png", bytes))
 		} catch (err) {
 			setError(errMessage(err, tt("sendStickerFailed")))
 		}
-	}, [keyReady, sendMediaBytes, appendMessage])
+	}, [keyReady, sendMediaBytes, appendMessage, noteSent])
 
 	const handleSendGif = useCallback(async (url: string) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId || !keyReady) return
 		setError(null)
+		noteSent(conversationId)
 		try {
 			const response = await fetch(url)
 			const buffer = new Uint8Array(await response.arrayBuffer())
@@ -1130,29 +1319,31 @@ export function Chat() {
 		} catch (err) {
 			setError(errMessage(err, tt("sendGifFailed")))
 		}
-	}, [keyReady, sendMediaBytes, appendMessage])
+	}, [keyReady, sendMediaBytes, appendMessage, noteSent])
 
 	const handleSendLocation = useCallback(async (location: LocationPayload, options: SendOptions = {}) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId || !keyReady) return
 		setError(null)
+		noteSent(conversationId, options)
 		try {
 			appendMessage(await deliverSealed(conversationId, encodeLocation(location), options))
 		} catch (err) {
 			setError(errMessage(err, tt("sendMessageFailed")))
 		}
-	}, [keyReady, deliverSealed, appendMessage])
+	}, [keyReady, deliverSealed, appendMessage, noteSent])
 
 	const handleSendContact = useCallback(async (contact: ContactPayload, options: SendOptions = {}) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId || !keyReady) return
 		setError(null)
+		noteSent(conversationId, options)
 		try {
 			appendMessage(await deliverSealed(conversationId, encodeContact(contact), options))
 		} catch (err) {
 			setError(errMessage(err, tt("sendMessageFailed")))
 		}
-	}, [keyReady, deliverSealed, appendMessage])
+	}, [keyReady, deliverSealed, appendMessage, noteSent])
 
 	const handleForward = useCallback(async (targetConversationId: string) => {
 		const message = forwardFor
@@ -1161,12 +1352,28 @@ export function Chat() {
 		setError(null)
 		try {
 			if (message.media) {
-				const cipher = await api.downloadFileBlob(message.media.fileId)
-				const bytes = await unpackImage(message.media, cipher)
-				const extra: Partial<MediaEnvelope> | undefined = message.media.kind === "voice"
-					? { kind: "voice", duration: message.media.duration, waveform: message.media.waveform }
-					: message.media.spoiler ? { spoiler: true } : undefined
-				appendMessage(await sendMediaBytes(targetConversationId, message.media.name, message.media.mime, bytes, message.media.caption, extra))
+				// An album goes over whole, as a new album of the same pictures.
+				const album = albumOf(message.media)
+				const items = album
+					? displayRef.current.filter((item) => item.senderId === message.senderId && !item.deleted && !item.locked && albumOf(item.media)?.id === album.id)
+					: [message]
+				const albumId = items.length > 1 ? newAlbumId() : null
+				for (const [index, item] of items.entries()) {
+					const media = item.media
+					if (!media) continue
+					const cipher = await api.downloadFileBlob(media.fileId)
+					const bytes = await unpackImage(media, cipher)
+					const extra: Partial<MediaEnvelope> = media.kind === "voice"
+						? { kind: "voice", duration: media.duration, waveform: media.waveform }
+						: {
+							...(media.spoiler ? { spoiler: true } : {}),
+							...(media.width && media.height ? { width: media.width, height: media.height } : {}),
+							...(safePreview(media.poster) ? { poster: safePreview(media.poster) ?? undefined } : {}),
+							...(media.duration ? { duration: media.duration } : {}),
+							...(albumId ? { album: { id: albumId, index, count: items.length } } : {}),
+						}
+					appendMessage(await sendMediaBytes(targetConversationId, media.name, media.mime, bytes, media.caption, extra))
+				}
 			} else {
 				const body = message.poll
 					? t("pollShort")
@@ -1186,10 +1393,11 @@ export function Chat() {
 	const handleCreatePoll = useCallback(async (input: PollDraftInput) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId || !keyReady) throw new Error(t("encryptionSettingUp"))
+		noteSent(conversationId)
 		const result = await ring().sealAndSend(conversationId, encodePollMessage(input), (ciphertext) => api.createPoll(conversationId, { ciphertext, optionCount: input.options.length, multipleChoice: input.multipleChoice, quiz: input.quiz }))
 		setRawMessages((previous) => previous.some((message) => message.id === result.message.id) ? previous : previous.concat([result.message]))
 		setPolls((previous) => [result.poll, ...previous.filter((poll) => poll.messageId !== result.poll.messageId)])
-	}, [keyReady, t])
+	}, [keyReady, noteSent, t])
 
 	const handleSubmitEdit = useCallback(
 		async (messageId: string, body: string) => {
@@ -1315,7 +1523,14 @@ export function Chat() {
 		setMembers((prev) => prev.map((member) => member.userId === memberId ? { ...member, role } : member))
 	}, [])
 
-	const handleSaveConversationProfile = useCallback(async (input: { title?: string; avatar?: string | null }) => {
+	const handleRemoveMember = useCallback(async (memberId: string) => {
+		const conversationId = activeIdRef.current
+		if (!conversationId) return
+		await api.removeMember(conversationId, memberId)
+		setMembers((prev) => prev.filter((member) => member.userId !== memberId))
+	}, [])
+
+	const handleSaveConversationProfile = useCallback(async (input: { title?: string; avatar?: string | null; description?: string | null }) => {
 		const conversationId = activeIdRef.current
 		if (!conversationId) return
 		const result = await api.setConversationProfile(conversationId, input)
@@ -1505,6 +1720,31 @@ export function Chat() {
 		}
 		return total
 	}, [conversations, unread])
+	// The tab icon shows what is waiting: unread chats that are not muted or
+	// archived, plus what came into the open chat while you were away.
+	const badgeCount = useMemo(() => {
+		let total = awayCount
+		const now = Date.now()
+		for (const conversation of conversations) {
+			if (conversation.archivedAt) continue
+			if (conversation.mutedUntil && new Date(conversation.mutedUntil).getTime() > now) continue
+			total += unread[conversation.id] ?? 0
+		}
+		return total
+	}, [conversations, unread, awayCount])
+	useEffect(() => { setTabBadge(badgeCount) }, [badgeCount])
+	useEffect(() => () => setTabBadge(0), [])
+	useEffect(() => {
+		const back = () => { if (!document.hidden && document.hasFocus()) setAwayCount(0) }
+		window.addEventListener("focus", back)
+		document.addEventListener("visibilitychange", back)
+		return () => {
+			window.removeEventListener("focus", back)
+			document.removeEventListener("visibilitychange", back)
+		}
+	}, [])
+	useEffect(() => { setAwayCount(0) }, [activeId])
+
 	const folderPickerChats = useMemo(
 		() => conversations.filter((conversation) => !conversation.archivedAt),
 		[conversations],
@@ -1866,6 +2106,100 @@ export function Chat() {
 		}
 	}, [openConversationById, t])
 
+	// The chat whose call this device is in; it need not be the open one.
+	const callConversationId = call.activeConversationId
+	const callConversation = callConversationId ? conversations.find((item) => item.id === callConversationId) ?? null : null
+	const callPeer = callConversation && callConversation.kind === "direct" && !callConversation.isSelf ? callConversation.peer ?? null : null
+	const [callChatMembers, setCallChatMembers] = useState<ConversationMember[]>([])
+	useEffect(() => {
+		if (!callConversationId || callConversationId === activeId) return
+		let alive = true
+		void api.getConversationMembers(callConversationId).then((res) => { if (alive) setCallChatMembers(res.members) }).catch(() => undefined)
+		return () => { alive = false }
+	}, [callConversationId, activeId, call.participants.length])
+	const callMembers = callConversationId && callConversationId === activeId ? members : callChatMembers
+	// The others in the call, with their microphones.
+	const callPeople = useMemo<CallPerson[]>(() => call.participants
+		.filter((id) => id !== currentUserId)
+		.map((id) => {
+			const member = callMembers.find((item) => item.userId === id)
+			return { id, name: member ? member.displayName || member.username : t("unknownUser"), avatar: member?.avatar ?? null, muted: call.mutedPeers.includes(id) }
+		}), [call.participants, call.mutedPeers, callMembers, currentUserId, t])
+	useEffect(() => {
+		if (!call.callId) setCallSoundBlocked(false)
+	}, [call.callId])
+	// One call at a time: calling from another chat first asks to leave the
+	// current call.
+	const { startOrJoin } = call
+	const startCall = useCallback((conversationId: string) => {
+		if (callConversationId && callConversationId !== conversationId) {
+			setCallSwitchTarget(conversationId)
+			return
+		}
+		void startOrJoin(conversationId)
+	}, [callConversationId, startOrJoin])
+	const renderCallBar = (onReturn?: () => void) => callConversation && call.callId ? (
+		<CallBar
+			participantCount={call.participants.length}
+			people={callPeople}
+			direct={callConversation.kind === "direct"}
+			muted={call.muted}
+			connectedCount={call.remotes.length}
+			localStream={call.localStream}
+			onToggleMute={call.toggleMute}
+			sharing={call.sharing}
+			screenStream={call.screenStream}
+			remoteScreens={call.remoteScreens}
+			onToggleShare={call.toggleShare}
+			onLeave={() => void call.leave()}
+			title={convTitle(callConversation)}
+			avatar={callPeer ? callPeer.avatar : callConversation.avatar}
+			seed={callPeer ? callPeer.id : callConversation.id}
+			shape={callPeer ? "circle" : callConversation.kind === "group" ? "group" : callConversation.kind === "channel" ? "channel" : "circle"}
+			joinedAt={call.joinedAt}
+			micNotice={call.micProblem ? t(MIC_PROBLEM_TEXT[call.micProblem]) : null}
+			soundBlocked={callSoundBlocked}
+			onReturn={onReturn}
+		/>
+	) : null
+	const returnToCall = callConversationId ? () => setActiveId(callConversationId) : undefined
+
+	// A profile opens with what is already known (name, picture) while the
+	// rest loads.
+	const openUserProfile = useCallback((userId: string) => {
+		const member = members.find((item) => item.userId === userId)
+		const peer = conversationsRef.current.find((item) => item.peer?.id === userId)?.peer
+		const known = member ? { displayName: member.displayName || member.username, username: member.username, avatar: member.avatar ?? null } : peer ? { displayName: peer.displayName, username: peer.username, avatar: peer.avatar } : user && user.id === userId ? { displayName: user.displayName, username: user.username, avatar: user.avatar ?? null } : undefined
+		setProfileTarget({ kind: "user", userId, seed: known })
+	}, [members, user])
+
+	const profileAuthorName = useCallback((senderId: string): string => {
+		const member = members.find((item) => item.userId === senderId)
+		if (member) return member.displayName || member.username
+		const peer = conversationsRef.current.find((item) => item.peer?.id === senderId)?.peer
+		return peer ? peer.displayName || peer.username : t("unknownUser")
+	}, [members, t])
+
+	// The safety code needs the person's public key; their chat may not be the open one.
+	const showSafetyFor = useCallback(async (name: string, userId: string) => {
+		const known = members.find((member) => member.userId === userId)?.publicKey
+		if (known) {
+			setSafetyTarget({ name, key: known })
+			return
+		}
+		const direct = conversationsRef.current.find((item) => item.kind === "direct" && item.peer?.id === userId)
+		if (!direct) {
+			setSafetyTarget({ name, key: null })
+			return
+		}
+		try {
+			const res = await api.getConversationMembers(direct.id)
+			setSafetyTarget({ name, key: res.members.find((member) => member.userId === userId)?.publicKey ?? null })
+		} catch {
+			setSafetyTarget({ name, key: null })
+		}
+	}, [members])
+
 	// Notifications (web push, native) open a chat, switching accounts first
 	// when the notification belongs to another account on this device.
 	useEffect(() => {
@@ -2051,6 +2385,7 @@ export function Chat() {
 						</IconButton>
 					) : null}
 				</div>
+				{call.callId && !activeId ? renderCallBar(returnToCall) : null}
 				{globalOpen ? (
 					<GlobalSearch
 						query={globalQuery}
@@ -2138,6 +2473,11 @@ export function Chat() {
 					</Banner>
 				) : null}
 				{error ? <div className="banner error" onClick={() => setError(null)}>{error}</div> : null}
+				{call.error ? (
+					<Banner tone="error" icon={<IPhoneCall />} className="main-banner" actions={<Button variant="text" onClick={call.clearError}>{t("close")}</Button>}>
+						{call.error}
+					</Banner>
+				) : null}
 				{keyPending && activeId ? (
 					<Banner tone="info" icon={<IKey />} className="main-banner key-banner" actions={
 						<>
@@ -2153,10 +2493,10 @@ export function Chat() {
 						<header className="thread-header">
 							<div className="thread-header-row">
 								<button type="button" className="thread-back" aria-label={t("back")} onClick={() => setActiveId(null)}><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg></button>
-								<button type="button" className="thread-title-wrap" onClick={() => { if (activeConversation.kind !== "direct" && !activeConversation.isSelf) setShowMembers(true); else if (directPeer) setSafetyTarget({ name: directPeer.displayName || directPeer.username, key: members.find((member) => member.userId === directPeer.id)?.publicKey ?? null }) }}>
+								<button type="button" className="thread-title-wrap" onClick={() => { if (activeConversation.kind !== "direct" && !activeConversation.isSelf) setProfileTarget({ kind: "chat", conversationId: activeConversation.id }); else if (directPeer) openUserProfile(directPeer.id) }}>
 									{directPeer ? <Avatar src={directPeer.avatar} label={directPeer.displayName || directPeer.username} seed={directPeer.id} size={40} className="thread-avatar" /> : activeConversation.kind !== "direct" ? <Avatar src={activeConversation.avatar} label={convTitle(activeConversation)} seed={activeConversation.id} size={40} shape={activeConversation.kind === "group" ? "group" : "channel"} className="thread-avatar" /> : null}
 									<div>
-										<h2 className="thread-title">{convTitle(activeConversation)}{directPeer?.isBot ? <span className="bot-badge"><IBot size={12} /> BOT</span> : null}</h2>
+										<h2 className="thread-title">{convTitle(activeConversation)}{directPeer?.isBot ? <BotBadge size={12} /> : null}</h2>
 										<p className="thread-sub">
 											<span className="tag">{activeConversation.isSelf ? t("savedMessages") : activeConversation.kind === "channel" ? t("kindChannel") : activeConversation.kind === "group" ? t("kindGroup") : directPeer?.isBot ? t("kindBot") : t("kindDirect")}</span>
 											{!activeConversation.isSelf && !directPeer?.isBot ? <span className="presence-summary" aria-live="polite"><span className={"presence-dot" + (onlineOtherMemberCount > 0 ? " online" : "")} aria-hidden="true" />{presenceLabel}</span> : null}
@@ -2177,7 +2517,7 @@ export function Chat() {
 										<ISearch />
 									</IconButton>
 									{!activeConversation.isSelf && activeConversation.kind !== "channel" && !directPeer?.isBot ? (
-										<IconButton label={t("call")} onClick={() => void call.startOrJoin(activeConversation.id)} disabled={!canSend || call.activeConversationId === activeConversation.id}>
+										<IconButton label={t("call")} onClick={() => startCall(activeConversation.id)} disabled={!canSend || call.joining || call.activeConversationId === activeConversation.id}>
 											<IPhoneCall />
 										</IconButton>
 									) : null}
@@ -2194,7 +2534,11 @@ export function Chat() {
 								{searchQuery ? <span className="muted">{filteredDisplay.length} {t("matches")}</span> : null}
 							</div>
 						) : null}
-						{call.activeConversationId === activeConversation.id && call.callId ? <CallBar participantCount={call.participants.length} muted={call.muted} remotes={call.remotes} localStream={call.localStream} onToggleMute={call.toggleMute} sharing={call.sharing} screenStream={call.screenStream} remoteScreens={call.remoteScreens} onToggleShare={call.toggleShare} onLeave={() => void call.leave()} title={convTitle(activeConversation)} avatar={directPeer ? directPeer.avatar : activeConversation.avatar} seed={directPeer ? directPeer.id : activeConversation.id} shape={directPeer ? "circle" : activeConversation.kind === "group" ? "group" : activeConversation.kind === "channel" ? "channel" : "circle"} /> : null}
+						{call.callId && callConversationId === activeConversation.id ? renderCallBar() : null}
+						{call.callId && callConversationId !== activeConversation.id ? renderCallBar(returnToCall) : null}
+						{callConversationId !== activeConversation.id && activeConversation.kind !== "channel" && call.ongoing[activeConversation.id]?.length ? (
+							<OngoingCallBar count={call.ongoing[activeConversation.id].length} busy={call.joining || !canSend} onJoin={() => startCall(activeConversation.id)} />
+						) : null}
 						<MessageThread
 							members={members} messages={filteredDisplay} isSelf={Boolean(activeConversation.isSelf)} readIds={readIds} conversationId={activeConversation.id}
 							reactions={reactions}
@@ -2229,15 +2573,18 @@ export function Chat() {
 							hasNewer={hasNewer}
 							loadingNewer={loadingNewer}
 							onLoadNewer={() => void handleLoadNewer()}
+							onShowLatest={showLatest}
+							sentAt={sentAt}
 							onMessageContact={(username) => void startChatWith(username)}
 							onBotButton={handleBotButton}
+							onOpenProfile={openUserProfile}
 						/>
 						<Composer
 							disabled={!keyReady || !canSend}
 							draft={draft}
 							value={composerValue}
 							onValueChange={updateComposerValue}
-							onSend={handleSend} onAttach={(file, caption, options) => void handleAttach(file, caption, options)}
+							onSend={handleSend} onAttachFiles={handleAttachFiles}
 							onSendSticker={(sticker) => void handleSendSticker(sticker)}
 							onSendGif={(url) => void handleSendGif(url)}
 							onSendVoice={(recording, options) => void handleSendVoice(recording, options)}
@@ -2311,8 +2658,48 @@ export function Chat() {
 				/>
 			) : null}
 			{showPollDialog ? <PollDialog opener={pollDialogOpenerRef.current} onClose={() => setShowPollDialog(false)} onCreate={handleCreatePoll} /> : null}
+			{call.callId ? <CallAudio remotes={call.remotes} onBlockedChange={setCallSoundBlocked} /> : null}
+			{callSwitchTarget ? (
+				<Sheet
+					title={t("callSwitchTitle")}
+					icon={<IPhoneCall />}
+					iconTone="primary"
+					size="sm"
+					onClose={() => setCallSwitchTarget(null)}
+					actions={
+						<>
+							<Button variant="text" onClick={() => setCallSwitchTarget(null)}>{t("cancel")}</Button>
+							<Button variant="filled" onClick={() => { const target = callSwitchTarget; setCallSwitchTarget(null); void startOrJoin(target) }}>{t("callSwitchAction")}</Button>
+						</>
+					}
+				>
+					<p className="settings-intro">{format(t("callSwitchCopy"), { chat: callConversation ? convTitle(callConversation) : "" })}</p>
+				</Sheet>
+			) : null}
 			{incomingCall ? <IncomingCallBanner label={incomingCallLabel} avatar={incomingCallConv ? (incomingCallConv.peer?.avatar ?? incomingCallConv.avatar) : null} seed={incomingCallConv ? (incomingCallConv.peer?.id ?? incomingCallConv.id) : undefined} onAccept={call.acceptIncoming} onDismiss={call.dismissIncoming} /> : null}
-			{showMembers ? <MemberDialog members={members} onlineUserIds={onlineUserIds} lastSeen={lastSeen} currentUserId={currentUserId} canManage={Boolean(canModerate)} conversation={activeConversation ?? undefined} onSaveProfile={handleSaveConversationProfile} onClose={() => setShowMembers(false)} onRoleChange={handleRoleChange} onLeave={handleLeaveConversation} onDelete={handleDeleteConversation} onMembersChanged={handleMembersChanged} /> : null}
+			{showMembers ? <MemberDialog members={members} onlineUserIds={onlineUserIds} lastSeen={lastSeen} currentUserId={currentUserId} canManage={Boolean(canModerate)} conversation={activeConversation ?? undefined} onSaveProfile={handleSaveConversationProfile} onClose={() => setShowMembers(false)} onRoleChange={handleRoleChange} onRemoveMember={handleRemoveMember} onLeave={handleLeaveConversation} onDelete={handleDeleteConversation} onMembersChanged={handleMembersChanged} onOpenProfile={openUserProfile} /> : null}
+			{profileTarget ? (
+				<ProfileDialog
+					key={profileTarget.kind === "user" ? "u:" + profileTarget.userId : "c:" + profileTarget.conversationId}
+					target={profileTarget}
+					currentUserId={currentUserId}
+					conversations={conversations}
+					activeConversationId={activeId}
+					titleOf={convTitle}
+					authorName={profileAuthorName}
+					memberCount={members.length}
+					onlineCount={onlineOtherMemberCount}
+					canManage={Boolean(canModerate) && activeConversation?.kind !== "direct"}
+					onClose={() => setProfileTarget(null)}
+					onOpenChat={(conversationId) => { setProfileTarget(null); setShowMembers(false); openConversationById(conversationId) }}
+					onAddFriend={(username) => { setProfileTarget(null); void startChatWith(username) }}
+					onShowMembers={() => { setProfileTarget(null); setShowMembers(true) }}
+					onShowSafety={(name, userId) => void showSafetyFor(name, userId)}
+					onEditOwnProfile={() => { setProfileTarget(null); setSettingsPage("account") }}
+					onJoinedChannel={(conversation) => { setConversations((prev) => (prev.some((item) => item.id === conversation.id) ? prev : [conversation, ...prev])); setProfileTarget(null); setShowMembers(false); openConversationById(conversation.id) }}
+					onResolveMedia={resolveMediaUrl}
+				/>
+			) : null}
 			{settingsPage && user ? <SettingsSheet user={user} initialPage={settingsPage} onClose={() => setSettingsPage(null)} onUpdated={updateUser} backgroundUnread={backgroundUnread} /> : null}
 			{signOutOpen ? <SignOutSheet onClose={() => setSignOutOpen(false)} /> : null}
 			{showFriends ? <FriendRequestsDialog onClose={() => { setShowFriends(false); void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {}) }} onFriendAccepted={(conversation) => { setConversations((prev) => prev.some((c) => c.id === conversation.id) ? prev : [conversation, ...prev]); setActiveId(conversation.id); setShowFriends(false); void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {}) }} /> : null}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import type { ReactNode } from "react"
 import { Avatar, Badge, IconButton, ListGroup, ListItem, Sheet, useSheetClose, type ShapeName, type Tone } from "../m3"
-import { IAdd, IBack, IBell, IBot, IClose, IDevices, IInfo, IKey, ILogout, IPalette, IPerson, IShield } from "../m3icons"
+import { IAdd, IBack, IBell, IBot, IBug, IClose, IDevices, IInfo, IKey, ILogout, IPalette, IPerson, IShield } from "../m3icons"
 import { MorphBlob } from "../Expressive"
 import { useAuth } from "../../state/auth"
 import { useSettings } from "../../state/settings"
@@ -16,9 +16,10 @@ import { NotificationsPage } from "./NotificationsPage"
 import { AppearancePage } from "./AppearancePage"
 import { BotsPage } from "./BotsPage"
 import { AboutPage } from "./AboutPage"
+import { BugReportPage } from "./BugReportPage"
 import { SignOutSheet } from "./SignOutSheet"
 
-export type SettingsPageId = "home" | "account" | "privacy" | "security" | "devices" | "notifications" | "appearance" | "bots" | "about"
+export type SettingsPageId = "home" | "account" | "privacy" | "security" | "devices" | "notifications" | "appearance" | "bots" | "report" | "about"
 
 type Category = { id: Exclude<SettingsPageId, "home">; title: StringKey; hint: StringKey; icon: ReactNode; shape: ShapeName; tone: Tone }
 
@@ -30,6 +31,7 @@ const CATEGORIES: Category[] = [
 	{ id: "notifications", title: "settingsNotifications", hint: "settingsNotificationsHint", icon: <IBell />, shape: "sunny", tone: "orange" },
 	{ id: "appearance", title: "appearance", hint: "settingsAppearanceHint", icon: <IPalette />, shape: "burst", tone: "pink" },
 	{ id: "bots", title: "settingsBots", hint: "settingsBotsHint", icon: <IBot />, shape: "pill", tone: "tertiary" },
+	{ id: "report", title: "bugReportTitle", hint: "bugReportHint", icon: <IBug />, shape: "burst", tone: "error" },
 	{ id: "about", title: "settingsAbout", hint: "settingsAboutHint", icon: <IInfo />, shape: "oval", tone: "neutral" },
 ]
 
@@ -96,6 +98,8 @@ function SettingsShell(props: { user: User; onUpdated: (user: User) => void; ini
 				return <AppearancePage />
 			case "bots":
 				return <BotsPage />
+			case "report":
+				return <BugReportPage />
 			case "about":
 				return <AboutPage />
 			default:

@@ -12,7 +12,7 @@ async function presenceOf(base: string, token: string, conversationId: string) {
 }
 
 test("stepping away hides the online status but keeps the connection and the call", async () => {
-  const s = await startTestServer()
+  const s = await startTestServer({ callReconnectGraceMs: 0 })
   try {
     const { a, b, cid } = await directConversation(s.base, "away_a", "away_b")
     const sub = s.app.bus.subscribeUser(b.user.id, () => {})

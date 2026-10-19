@@ -10,6 +10,7 @@ type InviteInfo = {
 	kind: string
 	title: string | null
 	avatar: string | null
+	description?: string | null
 }
 
 function kindKey(kind: string): StringKey {
@@ -118,6 +119,7 @@ export function Invite() {
 				</div>
 				<div className="invite-title">{info.title ?? t("inviteUntitled")}</div>
 				<p className="invite-kind">{t(kindKey(info.kind))} — {t("inviteKindSuffix")}</p>
+				{info.description ? <p className="invite-description">{info.description}</p> : null}
 				<div className="invite-actions">
 					<button type="button" className="button" onClick={continueInBrowser}>
 						{t("inviteContinueBrowser")}

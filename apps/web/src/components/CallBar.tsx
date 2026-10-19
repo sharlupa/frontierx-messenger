@@ -3,8 +3,8 @@ import type { RemoteAudio } from "../lib/useCall"
 import { useSettings } from "../state/settings"
 import { startLevelMeter } from "../lib/voice"
 import { ensureAudioContext } from "../lib/sound"
-import { Avatar } from "./m3"
-import { IExpand, IMic, IMicOff, IMinimize, IPhoneCall, IScreenShare } from "./m3icons"
+import { Avatar, Button, ShapeIcon } from "./m3"
+import { IChevronRight, IExpand, IMic, IMicOff, IMinimize, IPhoneCall, IScreenShare } from "./m3icons"
 
 function ScreenVideo(props: { stream: MediaStream; muted: boolean; label: string; fsLabel: string }) {
 	const ref = useRef(null as HTMLVideoElement | null)
@@ -56,7 +56,7 @@ function RemoteAudioTrack({
 	stream: MediaStream
 	peerId: string
 	audioMap: Map<string, HTMLAudioElement>
-	onBlocked: () => void
+	onBlocked: (blocked: boolean) => void
 }) {
 	const ref = useRef<HTMLAudioElement | null>(null)
 	useEffect(() => {
@@ -68,7 +68,7 @@ function RemoteAudioTrack({
 		audioMap.set(peerId, el)
 		const played = el.play()
 		if (played && typeof played.catch === "function") {
-			played.catch(() => onBlocked())
+			played.catch(() => onBlocked(true))
 		}
 		return () => {
 			audioMap.delete(peerId)
@@ -76,6 +76,39 @@ function RemoteAudioTrack({
 		}
 	}, [stream, peerId, audioMap, onBlocked])
 	return <audio ref={ref} autoPlay playsInline />
+}
+
+// The others' voices. Mounted for the whole call, whichever chat is open, so
+// moving to another chat never silences it. A browser may refuse to start the
+// sound before the person interacts with the page; the next click, key or
+// touch anywhere starts every voice again.
+export function CallAudio(props: { remotes: RemoteAudio[]; onBlockedChange: (blocked: boolean) => void }) {
+	const audioMapRef = useRef<Map<string, HTMLAudioElement>>(new Map())
+	const audioMap = audioMapRef.current
+	const { onBlockedChange } = props
+	useEffect(() => {
+		const resume = () => {
+			audioMap.forEach((el) => {
+				void el.play().catch(() => undefined)
+			})
+			onBlockedChange(false)
+		}
+		document.addEventListener("click", resume)
+		document.addEventListener("keydown", resume)
+		document.addEventListener("touchstart", resume)
+		return () => {
+			document.removeEventListener("click", resume)
+			document.removeEventListener("keydown", resume)
+			document.removeEventListener("touchstart", resume)
+		}
+	}, [audioMap, onBlockedChange, props.remotes.length])
+	return (
+		<div className="call-audio-sink" aria-hidden="true">
+			{props.remotes.map((remote) => (
+				<RemoteAudioTrack key={remote.peerId} peerId={remote.peerId} stream={remote.stream} audioMap={audioMap} onBlocked={onBlockedChange} />
+			))}
+		</div>
+	)
 }
 
 // Same bar count as the composer meter, so the two look alike.
@@ -122,10 +155,30 @@ function MicMeter({ stream, muted }: { stream: MediaStream | null; muted: boolea
 	)
 }
 
+// Someone else in the call, with whether their microphone is on.
+export type CallPerson = { id: string; name: string; avatar: string | null; muted: boolean }
+
+// The other person's microphone, under their picture: on, or crossed out.
+function PeerMic(props: { person: CallPerson; size?: "s" | "m" }) {
+	const { t } = useSettings()
+	const label = (props.person.muted ? t("callPeerMicOff") : t("callPeerMicOn")) + ": " + props.person.name
+	return (
+		<span className={"call-peer-mic" + (props.person.muted ? " off" : "") + (props.size === "s" ? " small" : "")} role="img" aria-label={label} title={label}>
+			<span className="call-peer-mic-icon" key={props.person.muted ? "off" : "on"}>
+				{props.person.muted ? <IMicOff size={props.size === "s" ? 12 : 16} /> : <IMic size={props.size === "s" ? 12 : 16} />}
+			</span>
+		</span>
+	)
+}
+
 export function CallBar(props: {
 	participantCount: number
+	// The others in the call; a one-to-one call has one.
+	people: CallPerson[]
+	direct: boolean
 	muted: boolean
-	remotes: RemoteAudio[]
+	// How many of the others are connected (their voice arrives).
+	connectedCount: number
 	localStream: MediaStream | null
 	onToggleMute: () => void
 	sharing: boolean
@@ -137,57 +190,33 @@ export function CallBar(props: {
 	avatar?: string | null
 	seed?: string
 	shape?: "circle" | "group" | "channel"
+	// When this device joined; the timer counts from here.
+	joinedAt: number | null
+	// Why the microphone is not working, if it is not.
+	micNotice?: string | null
+	// The browser held the sound back; a click anywhere starts it (CallAudio).
+	soundBlocked: boolean
+	// The call belongs to another chat than the open one: a slim bar that
+	// leads back to it.
+	onReturn?: () => void
 }) {
 	const { t } = useSettings()
-	const [blocked, setBlocked] = useState(false)
-	const audioMapRef = useRef<Map<string, HTMLAudioElement>>(new Map())
-	const audioMap = audioMapRef.current
-	const onBlocked = useCallback(() => setBlocked(true), [])
-	const enableSound = useCallback(() => {
-		audioMap.forEach((el) => {
-			void el.play().catch(() => undefined)
-		})
-		setBlocked(false)
-	}, [audioMap])
-
-	useEffect(() => {
-		const resume = () => {
-			audioMap.forEach((el) => {
-				void el.play().catch(() => undefined)
-			})
-			setBlocked(false)
-		}
-		// Remote audio elements mount after the join gesture, so their first
-		// play() may be blocked or resolve muted. Keep unlock listeners armed for
-		// the whole call and re-run when a remote arrives, so the next user
-		// interaction (re)plays every remote track.
-		document.addEventListener("click", resume)
-		document.addEventListener("keydown", resume)
-		document.addEventListener("touchstart", resume)
-		return () => {
-			document.removeEventListener("click", resume)
-			document.removeEventListener("keydown", resume)
-			document.removeEventListener("touchstart", resume)
-		}
-	}, [audioMap, props.remotes.length])
+	const blocked = props.soundBlocked
 
 	const screenNodes: any[] = []
 	if (props.screenStream) screenNodes.push(createElement(ScreenVideo, { key: "local", stream: props.screenStream, muted: true, label: t('yourScreen'), fsLabel: t('fullscreen') }))
 	props.remoteScreens.forEach((entry) => screenNodes.push(createElement(ScreenVideo, { key: entry.peerId, stream: entry.stream, muted: false, label: t('sharedScreen'), fsLabel: t('fullscreen') })))
 	const screensNode = screenNodes.length ? createElement("div", { className: "call-screens" }, screenNodes) : null
 
-	const [collapsed, setCollapsed] = useState(false)
-	const elapsed = useElapsed()
-	const waiting = props.remotes.length === 0
+	const [collapsedHere, setCollapsed] = useState(false)
+	const collapsed = collapsedHere || Boolean(props.onReturn)
+	const elapsed = useElapsed(props.joinedAt)
+	const waiting = props.connectedCount === 0
 	const status = waiting ? t("callWaiting") : props.participantCount > 2 ? elapsed + " · " + props.participantCount + " " + t("inCall") : elapsed
-
-	const sink = (
-		<div className="call-audio-sink" aria-hidden="true">
-			{props.remotes.map((remote) => (
-				<RemoteAudioTrack key={remote.peerId} peerId={remote.peerId} stream={remote.stream} audioMap={audioMap} onBlocked={onBlocked} />
-			))}
-		</div>
-	)
+	// The sound button is a plain button: the click itself is what lets
+	// CallAudio start the voices.
+	const soundButton = blocked ? <button type="button" className="call-sound-btn">{t("enableSound")}</button> : null
+	const micNotice = props.micNotice ? <p className="call-mic-notice" role="status"><IMicOff size={16} /><span>{props.micNotice}</span></p> : null
 	const muteButton = (small: boolean) => (
 		<button type="button" className={"call-btn" + (small ? " small" : "") + (props.muted ? " off" : "")} onClick={props.onToggleMute} aria-pressed={props.muted} aria-label={props.muted ? t("unmute") : t("mute")} title={props.muted ? t("unmute") : t("mute")}>
 			{props.muted ? <IMicOff size={small ? 18 : 24} /> : <IMic size={small ? 18 : 24} />}
@@ -200,21 +229,26 @@ export function CallBar(props: {
 	)
 
 	if (collapsed) {
+		const returning = Boolean(props.onReturn)
 		return (
-			<div className="call-mini" role="region" aria-label={t("voiceCall")}>
-				<button type="button" className="call-mini-main" onClick={() => setCollapsed(false)} aria-label={t("callExpand")}>
+			<div className={"call-mini" + (returning ? " elsewhere" : "")} role="region" aria-label={t("voiceCall")}>
+				<button type="button" className="call-mini-main" onClick={() => (props.onReturn ? props.onReturn() : setCollapsed(false))} aria-label={returning ? t("callReturn") : t("callExpand")} title={returning ? t("callReturn") : undefined}>
 					<Avatar src={props.avatar} label={props.title} seed={props.seed} size={32} shape={props.shape} />
 					<span className="call-mini-text">
 						<span className="call-mini-title">{props.title}</span>
-						<span className="call-mini-status"><span className={"call-live-dot" + (waiting ? " waiting" : "")} aria-hidden="true" />{status}</span>
+						<span className="call-mini-status">
+							<span className={"call-live-dot" + (waiting ? " waiting" : "")} aria-hidden="true" />
+							{status}
+							{props.people.some((person) => person.muted) ? <span className="call-mini-muted" title={t("callPeerMicOff")} aria-label={t("callPeerMicOff")}><IMicOff size={13} /></span> : null}
+						</span>
 					</span>
-					<IExpand size={18} />
+					{returning ? <IChevronRight size={18} /> : <IExpand size={18} />}
 				</button>
-				{blocked ? <button type="button" className="call-sound-btn" onClick={enableSound}>{t("enableSound")}</button> : null}
+				{soundButton}
 				{muteButton(true)}
 				{endButton(true)}
-				{screensNode}
-				{sink}
+				{returning ? null : screensNode}
+				{micNotice}
 			</div>
 		)
 	}
@@ -228,13 +262,28 @@ export function CallBar(props: {
 				<span className="call-ring" aria-hidden="true" />
 				<span className="call-ring second" aria-hidden="true" />
 				<Avatar src={props.avatar} label={props.title} seed={props.seed} size={104} shape={props.shape} className="call-av-img" />
+				{props.direct && props.people[0] ? <PeerMic person={props.people[0]} /> : null}
 			</div>
 			<div className="call-card-text">
 				<div className="call-card-title">{props.title}</div>
 				<div className="call-card-status">{status}</div>
 			</div>
+			{!props.direct && props.people.length > 0 ? (
+				<ul className="call-people" aria-label={t("inCall")}>
+					{props.people.map((person) => (
+						<li key={person.id} className="call-person" title={person.name}>
+							<span className="call-person-av">
+								<Avatar src={person.avatar} label={person.name} seed={person.id} size={40} />
+								<PeerMic person={person} size="s" />
+							</span>
+							<span className="call-person-name">{person.name}</span>
+						</li>
+					))}
+				</ul>
+			) : null}
 			<MicMeter stream={props.localStream} muted={props.muted} />
-			{blocked ? <button type="button" className="call-sound-btn" onClick={enableSound}>{t("enableSound")}</button> : null}
+			{micNotice}
+			{soundButton}
 			<div className="call-card-actions">
 				{muteButton(false)}
 				<button type="button" className={"call-btn" + (props.sharing ? " on" : "")} onClick={props.onToggleShare} aria-pressed={props.sharing} aria-label={props.sharing ? t("stopShare") : t("shareScreen")} title={props.sharing ? t("stopShare") : t("shareScreen")}>
@@ -243,14 +292,14 @@ export function CallBar(props: {
 				{endButton(false)}
 			</div>
 			{screensNode}
-			{sink}
 		</div>
 	)
 }
 
-// mm:ss (h:mm:ss after an hour) since the call view appeared.
-function useElapsed(): string {
-	const [started] = useState(() => Date.now())
+// mm:ss (h:mm:ss after an hour) since joining the call.
+function useElapsed(since: number | null): string {
+	const [mountedAt] = useState(() => Date.now())
+	const started = since ?? mountedAt
 	const [now, setNow] = useState(() => Date.now())
 	useEffect(() => {
 		const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -283,6 +332,21 @@ export function IncomingCallBanner(props: { label: string; onAccept: () => void;
 					<IPhoneCall size={18} />
 				</button>
 			</div>
+		</div>
+	)
+}
+
+// A call is going on in the open chat and this device is not in it.
+export function OngoingCallBar(props: { count: number; busy: boolean; onJoin: () => void }) {
+	const { t } = useSettings()
+	return (
+		<div className="call-ongoing" role="status">
+			<ShapeIcon icon={<IPhoneCall size={18} />} shape="circle" tone="green" size={40} />
+			<span className="call-ongoing-text">
+				<span className="call-ongoing-title">{t("callOngoing")}</span>
+				<span className="call-ongoing-count">{props.count} {t("inCall")}</span>
+			</span>
+			<Button variant="filled" disabled={props.busy} onClick={props.onJoin}>{t("join")}</Button>
 		</div>
 	)
 }

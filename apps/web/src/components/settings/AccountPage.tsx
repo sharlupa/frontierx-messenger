@@ -2,18 +2,28 @@ import { useEffect, useRef, useState } from "react"
 import type { ChangeEvent } from "react"
 import { api, type EmailState } from "../../lib/api"
 import { errorText } from "../../lib/errorText"
-import type { User } from "../../lib/types"
+import { formatBytes, plural } from "../../lib/i18n"
+import type { ProfileChat, User } from "../../lib/types"
 import { useSettings } from "../../state/settings"
 import { useAuth } from "../../state/auth"
 import { AvatarCropper } from "../AvatarCropper"
 import { Avatar, Banner, Button, ListGroup, ListItem, Sheet, TextField } from "../m3"
-import { IImage, IMail, IPerson, ITrash, IWarning } from "../m3icons"
-import { CopyButton, PageIntro } from "./common"
+import { IImage, IMail, IMegaphone, IPerson, ITrash, IWarning } from "../m3icons"
+import { ChoiceSheet, CopyButton, PageIntro } from "./common"
+
+// The largest picture accepted for your profile photo.
+const MAX_AVATAR_BYTES = 8 * 1024 * 1024
+
+const BIO_MAX = 200
 
 export function AccountPage(props: { user: User; onUpdated: (user: User) => void }) {
-	const { t } = useSettings()
+	const { t, lang } = useSettings()
 	const { user } = props
 	const [displayName, setDisplayName] = useState(user.displayName)
+	const [bio, setBio] = useState(user.bio ?? "")
+	const [channels, setChannels] = useState<ProfileChat[] | null>(null)
+	const [channelPicker, setChannelPicker] = useState(false)
+	const [channelBusy, setChannelBusy] = useState(false)
 	const [saving, setSaving] = useState(false)
 	const [avatarBusy, setAvatarBusy] = useState(false)
 	const [cropperSrc, setCropperSrc] = useState<string | null>(null)
@@ -22,15 +32,25 @@ export function AccountPage(props: { user: User; onUpdated: (user: User) => void
 	const [deleting, setDeleting] = useState(false)
 	const fileRef = useRef<HTMLInputElement | null>(null)
 
-	const saveName = async () => {
+	// The channels this user runs; one of them can sit on the profile.
+	useEffect(() => {
+		let active = true
+		void api.listManagedChannels().then((res) => { if (active) setChannels(res.channels) }).catch(() => { if (active) setChannels([]) })
+		return () => { active = false }
+	}, [])
+
+	const nameChanged = displayName.trim() !== user.displayName
+	const bioChanged = bio.trim() !== (user.bio ?? "")
+	const saveProfile = async () => {
 		const name = displayName.trim()
-		if (!name || name === user.displayName) return
+		if (!name || (!nameChanged && !bioChanged)) return
 		setSaving(true)
 		setError(null)
 		setNotice(null)
 		try {
-			const res = await api.updateProfile({ displayName: name })
+			const res = await api.updateProfile({ ...(nameChanged ? { displayName: name } : {}), ...(bioChanged ? { bio: bio.trim() || null } : {}) })
 			props.onUpdated(res.user)
+			setBio(res.user.bio ?? "")
 			setNotice(t("profileSaved"))
 		} catch (err) {
 			setError(errorText(err, t("profileSaveFailed")))
@@ -39,12 +59,28 @@ export function AccountPage(props: { user: User; onUpdated: (user: User) => void
 		}
 	}
 
+	const setPersonalChannel = async (channelId: string | null) => {
+		setChannelBusy(true)
+		setError(null)
+		setNotice(null)
+		try {
+			const res = await api.updateProfile({ personalChannelId: channelId })
+			props.onUpdated(res.user)
+			setNotice(t("profileSaved"))
+		} catch (err) {
+			setError(errorText(err, t("profileSaveFailed")))
+		} finally {
+			setChannelBusy(false)
+		}
+	}
+	const personalChannel = channels?.find((channel) => channel.id === user.personalChannelId) ?? null
+
 	const onPickAvatar = (event: ChangeEvent<HTMLInputElement>) => {
 		const file = event.target.files && event.target.files[0] ? event.target.files[0] : null
 		event.target.value = ""
 		if (!file) return
-		if (file.size > 8 * 1024 * 1024) {
-			setError(t("fileTooLarge") + " 8 MB")
+		if (file.size > MAX_AVATAR_BYTES) {
+			setError(t("fileTooLarge") + " " + formatBytes(lang, MAX_AVATAR_BYTES))
 			return
 		}
 		const reader = new FileReader()
@@ -84,14 +120,26 @@ export function AccountPage(props: { user: User; onUpdated: (user: User) => void
 
 			<ListGroup label={t("profile")}>
 				<div className="m3-list-item settings-form-item">
-					<TextField label={t("displayName")} value={displayName} maxLength={64} onChange={setDisplayName} onEnter={() => void saveName()} />
-					{displayName.trim() !== user.displayName ? (
+					<TextField label={t("displayName")} value={displayName} maxLength={64} onChange={setDisplayName} onEnter={() => void saveProfile()} />
+					<TextField label={t("bioLabel")} value={bio} maxLength={BIO_MAX} multiline onChange={setBio} supporting={<span className="field-counter"><span>{t("bioHint")}</span><span>{bio.length}/{BIO_MAX}</span></span>} />
+					{nameChanged || bioChanged ? (
 						<div className="m3-row settings-form-actions">
-							<Button variant="filled" busy={saving} onClick={() => void saveName()}>{t("saveProfile")}</Button>
+							<Button variant="filled" busy={saving} disabled={!displayName.trim()} onClick={() => void saveProfile()}>{t("saveProfile")}</Button>
 						</div>
 					) : null}
 				</div>
 				<ListItem title={"@" + user.username} subtitle={t("usernameHint")} icon={<IPerson />} shape="circle" tone="secondary" trailing={<CopyButton value={"@" + user.username} label={t("copy")} />} />
+				<ListItem
+					title={t("personalChannel")}
+					subtitle={personalChannel ? personalChannel.title || t("kindChannel") : channels && channels.length === 0 ? t("personalChannelNone") : t("personalChannelHint")}
+					multiline
+					icon={<IMegaphone />}
+					shape="clover"
+					tone="orange"
+					disabled={channelBusy || !channels || channels.length === 0}
+					onClick={() => setChannelPicker(true)}
+					chevron
+				/>
 			</ListGroup>
 
 			<EmailSection />
@@ -100,6 +148,16 @@ export function AccountPage(props: { user: User; onUpdated: (user: User) => void
 				<ListItem title={t("deleteAccountButton")} subtitle={t("deleteAccountText")} multiline icon={<ITrash />} shape="clover" danger onClick={() => setDeleting(true)} />
 			</ListGroup>
 
+			{channelPicker && channels ? (
+				<ChoiceSheet
+					title={t("personalChannel")}
+					subtitle={t("personalChannelHint")}
+					value={personalChannel ? personalChannel.id : ""}
+					options={[{ value: "", label: t("personalChannelOff") }, ...channels.map((channel) => ({ value: channel.id, label: channel.title || t("kindChannel"), description: plural(lang, "subscribersCount", channel.memberCount) }))]}
+					onPick={(value) => void setPersonalChannel(value || null)}
+					onClose={() => setChannelPicker(false)}
+				/>
+			) : null}
 			{cropperSrc ? <AvatarCropper src={cropperSrc} onCancel={() => setCropperSrc(null)} onConfirm={(dataUrl) => { setCropperSrc(null); void setAvatar(dataUrl) }} /> : null}
 			{deleting ? <DeleteAccountSheet onClose={() => setDeleting(false)} /> : null}
 		</div>

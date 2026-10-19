@@ -351,6 +351,14 @@ const botPruneTimer = setInterval(() => {
 }, 3600000)
 botPruneTimer.unref()
 
+// Bug reports Telegram did not take yet (it was down, or no bot was set up
+// when they were sent) go out on the next pass.
+const BUG_REPORT_PASS_MS = 120000
+const bugReportTimer = setInterval(() => {
+  app.deliverBugReports().catch((error) => console.error("[frontierx-api] bug report delivery failed", error))
+}, BUG_REPORT_PASS_MS)
+bugReportTimer.unref()
+
 const seenTimer = setInterval(() => {
   try {
     app.refreshLastSeen()

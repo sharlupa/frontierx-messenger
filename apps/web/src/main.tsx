@@ -4,6 +4,7 @@ import { BrowserRouter } from "react-router-dom"
 import { App } from "./App"
 import { AuthProvider } from "./state/auth"
 import { SettingsProvider } from "./state/settings"
+import { installErrorLog } from "./lib/diagnostics"
 import "./theme.css"
 import "./features.css"
 import "./mobile-fixes.css"
@@ -11,6 +12,9 @@ import "./expressive.css"
 import "./m3.css"
 import "./m3-screens.css"
 import "./m3-emoji.css"
+
+// Errors from here on can go with a bug report.
+installErrorLog()
 
 const rootElement = document.getElementById("root")
 if (!rootElement) {

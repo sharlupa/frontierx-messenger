@@ -24,7 +24,9 @@ function Svg({ size = 20, className, children, fill }: Props & { children: React
 	)
 }
 
+export const IArrowDown = (p: Props) => <Svg {...p}><path d="M12 5v14" /><path d="m6 13 6 6 6-6" /></Svg>
 export const IPerson = (p: Props) => <Svg {...p}><circle cx="12" cy="8" r="4" /><path d="M4 20.5c1.2-4 4.3-6 8-6s6.8 2 8 6" /></Svg>
+export const IPersonRemove = (p: Props) => <Svg {...p}><circle cx="10" cy="8" r="4" /><path d="M3 20.5c1.1-3.8 3.9-5.8 7-5.8 1.4 0 2.7.4 3.8 1.1" /><path d="M16 17.5h6" /></Svg>
 export const IPeople = (p: Props) => <Svg {...p}><circle cx="9" cy="8.5" r="3.5" /><path d="M2.5 19.5c.9-3.4 3.4-5.2 6.5-5.2s5.6 1.8 6.5 5.2" /><path d="M15.5 5.3a3.5 3.5 0 0 1 0 6.4" /><path d="M17.5 14.6c2 .7 3.4 2.3 4 4.9" /></Svg>
 export const ILock = (p: Props) => <Svg {...p}><rect x="4.5" y="10.5" width="15" height="10" rx="3" /><path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" /><path d="M12 14.5v2" /></Svg>
 export const IKey = (p: Props) => <Svg {...p}><circle cx="8" cy="15" r="4.5" /><path d="M11.3 11.7 20 3" /><path d="M16.5 6.5l2.5 2.5" /><path d="M14.5 8.5l2 2" /></Svg>
@@ -35,6 +37,7 @@ export const IBellOff = (p: Props) => <Svg {...p}><path d="M18 16v-5a6 6 0 0 0-9
 export const IDevices = (p: Props) => <Svg {...p}><rect x="3" y="5" width="13" height="10" rx="2" /><path d="M6 19h7" /><rect x="17" y="9" width="4.5" height="10" rx="1.4" /></Svg>
 export const IPhone = (p: Props) => <Svg {...p}><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" /><path d="M11 18.5h2" /></Svg>
 export const IBot = (p: Props) => <Svg {...p}><rect x="4" y="8" width="16" height="11" rx="4" /><path d="M12 8V4.5" /><circle cx="12" cy="3.5" r="1" /><circle cx="9" cy="13" r="1.3" /><circle cx="15" cy="13" r="1.3" /><path d="M2 12.5v2.5M22 12.5v2.5" /></Svg>
+export const IBug = (p: Props) => <Svg {...p}><rect x="7" y="8" width="10" height="12" rx="5" /><path d="M9.5 8V6.8a2.5 2.5 0 0 1 5 0V8" /><path d="M12 12v8" /><path d="M7 12.5H3.5M20.5 12.5H17M7.6 17.4 4.5 19.5M16.4 17.4l3.1 2.1M7.6 9.6 4.8 7.5M16.4 9.6l2.8-2.1" /></Svg>
 export const ICode = (p: Props) => <Svg {...p}><path d="m8 8-4.5 4L8 16" /><path d="m16 8 4.5 4L16 16" /><path d="m13.5 5-3 14" /></Svg>
 export const IInfo = (p: Props) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5" /><path d="M12 7.6h.01" /></Svg>
 export const ILogout = (p: Props) => <Svg {...p}><path d="M14 4h3.5A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14" /><path d="M10 16.5 5.5 12 10 7.5" /><path d="M5.5 12H15" /></Svg>
@@ -70,6 +73,11 @@ export const IMap = (p: Props) => <Svg {...p}><path d="M9 4 3.5 6v14L9 18l6 2 5.
 export const IGallery = (p: Props) => <Svg {...p}><rect x="3" y="3" width="8" height="8" rx="2" /><rect x="13" y="3" width="8" height="8" rx="2" /><rect x="3" y="13" width="8" height="8" rx="2" /><rect x="13" y="13" width="8" height="8" rx="2" /></Svg>
 export const IReply = (p: Props) => <Svg {...p}><path d="M9.5 7 4.5 12l5 5" /><path d="M5 12h9a5.5 5.5 0 0 1 5.5 5.5V19" /></Svg>
 export const IForward = (p: Props) => <Svg {...p}><path d="M14.5 7l5 5-5 5" /><path d="M19 12h-9a5.5 5.5 0 0 0-5.5 5.5V19" /></Svg>
+export const IPlay = (p: Props) => <Svg {...p} fill><path d="M8 5.5v13a1 1 0 0 0 1.5.9l10.4-6.5a1 1 0 0 0 0-1.8L9.5 4.6A1 1 0 0 0 8 5.5z" /></Svg>
+export const ICrop = (p: Props) => <Svg {...p}><path d="M6 2.5V17a1 1 0 0 0 1 1h14.5" /><path d="M2.5 6H17a1 1 0 0 1 1 1v14.5" /></Svg>
+export const IRotateLeft = (p: Props) => <Svg {...p}><path d="M4.5 9.5A8 8 0 1 1 4 14" /><path d="M4 4.5v5h5" /></Svg>
+export const IUndo = (p: Props) => <Svg {...p}><path d="M9 14 4 9l5-5" /><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" /></Svg>
+export const IBrush = (p: Props) => <Svg {...p}><path d="M20.5 3.5 11 13" /><path d="M10.5 13.5c-2.2-.3-4 1.3-4.3 3.4-.2 1.6-1 2.6-2.7 3.1 3.8 1 7.9.3 8.6-3 .3-1.4-.2-2.6-1.6-3.5z" /></Svg>
 export const IEdit = (p: Props) => <Svg {...p}><path d="M4 20h4L19.5 8.5a2.8 2.8 0 0 0-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></Svg>
 export const IPinOff = (p: Props) => <Svg {...p}><path d="M9 4h6l-1 5 3 3v2H7v-2l3-3-1-5zM12 14v6M3 3l18 18" /></Svg>
 export const ISmilePlus = (p: Props) => <Svg {...p}><circle cx="11" cy="12" r="8" /><path d="M8 14.5c.8 1 1.8 1.5 3 1.5s2.2-.5 3-1.5M8.5 10h.01M13.5 10h.01" /><path d="M19 3v4M17 5h4" /></Svg>
@@ -93,3 +101,5 @@ export const IMore = (p: Props) => <Svg {...p}><circle cx="12" cy="5.5" r="1.2" 
 export const IPin = (p: Props) => <Svg {...p}><path d="M9 3.5h6l-1 5 3 3v1.5H7V11.5l3-3z" /><path d="M12 13v7.5" /></Svg>
 export const IApple = (p: Props) => <Svg {...p}><path d="M15.5 3.5c-.9.1-2 .7-2.6 1.5-.6.7-1 1.7-.9 2.6 1 0 2-.5 2.6-1.3.6-.7 1-1.7.9-2.8z" /><path d="M17.8 12.6c0-2 1.6-3 1.7-3.1-1-1.4-2.4-1.6-2.9-1.6-1.2-.1-2.4.7-3 .7-.6 0-1.6-.7-2.6-.7a3.9 3.9 0 0 0-3.3 2c-1.4 2.4-.4 6 1 8 .7 1 1.5 2 2.5 2s1.4-.6 2.6-.6 1.5.6 2.6.6 1.7-1 2.4-2c.5-.7.9-1.5 1.1-2.3-1.2-.5-2.1-1.7-2.1-3z" /></Svg>
 export const ISettingsGear = (p: Props) => <Svg {...p}><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></Svg>
+export const IMegaphone = (p: Props) => <Svg {...p}><path d="M4 10v4a1.5 1.5 0 0 0 1.5 1.5H8l7 4.5V4L8 8.5H5.5A1.5 1.5 0 0 0 4 10z" /><path d="M8 15.5 9.5 21" /><path d="M18.5 9a4 4 0 0 1 0 6" /></Svg>
+export const IGif = (p: Props) => <Svg {...p}><rect x="2.5" y="5" width="19" height="14" rx="3.5" /><path d="M10 10.2a2.2 2.2 0 1 0 .2 3.6V12H8.8" /><path d="M13 9.5v5" /><path d="M16 14.5v-5h2.6M16 12h2" /></Svg>

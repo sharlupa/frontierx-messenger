@@ -1,8 +1,17 @@
 import { defineConfig } from "vite"
 import react from "@vitejs/plugin-react"
 import { VitePWA } from "vite-plugin-pwa"
+import { readFileSync } from "node:fs"
+
+// The version comes from package.json and the build time is stamped in, so
+// the About page and bug reports say exactly which build someone runs.
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string }
 
 export default defineConfig({
+	define: {
+		__APP_VERSION__: JSON.stringify(pkg.version),
+		__APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16) + "Z"),
+	},
 	plugins: [
 		react(),
 		VitePWA({
@@ -28,6 +37,9 @@ export default defineConfig({
 				// Web push (notifications with the app closed, including installed
 				// web apps on iPhone) is handled by a small script of our own.
 				importScripts: ["/push-sw.js"],
+				// The emoji search index is fetched only when someone searches, so
+				// it is not downloaded ahead with the rest of the app.
+				globIgnores: ["**/emojiNames-*.js"],
 				// frontierx-landing
 				navigateFallback: "/index.html",
 				// Landing routes must reach the server: without them here the app's

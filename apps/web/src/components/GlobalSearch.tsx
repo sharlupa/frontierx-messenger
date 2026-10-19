@@ -6,8 +6,9 @@ import { normalize, snippet, type SearchEngine, type SearchFilter, type SearchIt
 import type { Conversation, UserSummary } from "../lib/types"
 import { useSettings } from "../state/settings"
 import { LoadingIndicator, MorphBlob, WavyProgress } from "./Expressive"
+import { BotBadge } from "./BotBadge"
 import { Avatar, Chip } from "./m3"
-import { IBot, IContact, IFile, IImage, ILink, ILocation, IMic, IPoll, ISearch } from "./m3icons"
+import { IContact, IFile, IImage, ILink, ILocation, IMic, IPoll, ISearch } from "./m3icons"
 
 const FILTERS: Array<{ id: SearchFilter; label: StringKey }> = [
 	{ id: "all", label: "searchAll" },
@@ -164,7 +165,7 @@ export function GlobalSearch(props: {
 							<button key={conversation.id} type="button" className="search-row" onClick={() => props.onOpenConversation(conversation.id)}>
 								<Avatar src={conversation.avatar || conversation.peer?.avatar} label={props.titleOf(conversation)} seed={conversation.peer?.id ?? conversation.id} size={40} shape={conversation.kind === "group" ? "group" : conversation.kind === "channel" ? "channel" : "circle"} />
 								<span className="search-row-text">
-									<span className="search-row-title">{props.titleOf(conversation)}{conversation.peer?.isBot ? <span className="bot-badge"><IBot size={12} /> BOT</span> : null}</span>
+									<span className="search-row-title">{props.titleOf(conversation)}{conversation.peer?.isBot ? <BotBadge size={12} /> : null}</span>
 									<span className="search-row-sub">{conversation.peer ? "@" + conversation.peer.username : conversation.kind === "channel" ? t("kindChannel") : t("kindGroup")}</span>
 								</span>
 							</button>
@@ -178,7 +179,7 @@ export function GlobalSearch(props: {
 							<button key={person.id} type="button" className="search-row" onClick={() => props.onStartChat(person)}>
 								<Avatar src={person.avatar} label={person.displayName || person.username} seed={person.id} size={40} />
 								<span className="search-row-text">
-									<span className="search-row-title">{person.displayName || person.username}{person.isBot ? <span className="bot-badge"><IBot size={12} /> BOT</span> : null}</span>
+									<span className="search-row-title">{person.displayName || person.username}{person.isBot ? <BotBadge size={12} /> : null}</span>
 									<span className="search-row-sub">@{person.username} · {person.isBot ? t("botStart") : t("addFriend")}</span>
 								</span>
 							</button>

@@ -4,8 +4,9 @@ import { api } from "../lib/api"
 import { useAuth } from "../state/auth"
 import { useSettings } from "../state/settings"
 import { errorText } from "../lib/errorText"
+import { BotBadge } from "./BotBadge"
 import { Avatar, Banner, Button, IconButton, ListGroup, ListItem, Sheet, TextField } from "./m3"
-import { IAdd, IBot, ICheck, IClose, IPeople, ITrash } from "./m3icons"
+import { IAdd, ICheck, IClose, IPeople, ITrash } from "./m3icons"
 
 function requestName(request: FriendRequest): string {
 	return request.displayName || request.username || request.fromUser
@@ -142,7 +143,7 @@ export function FriendRequestsDialog({
 							<ListItem
 								key={item.id}
 								leading={<Avatar src={item.avatar} label={item.displayName || item.username} seed={item.id} size={36} />}
-								title={<>{item.displayName || item.username}{item.isBot ? <span className="bot-badge"><IBot size={11} /> BOT</span> : null}</>}
+								title={<>{item.displayName || item.username}{item.isBot ? <BotBadge /> : null}</>}
 								subtitle={"@" + item.username}
 								disabled={busy}
 								onClick={() => void send(item.username)}

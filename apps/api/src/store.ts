@@ -32,6 +32,9 @@ export interface UserRow {
   avatar: string | null
   isBot?: boolean
   botOwnerId?: string | null
+  // Optional "about" text and a channel shown on the profile.
+  bio?: string | null
+  personalChannelId?: string | null
 }
 export interface SessionRow {
   id: string
@@ -54,6 +57,7 @@ export interface ConversationRow {
   archivedAt?: string | null
   mutedUntil?: string | null
   ttlSeconds?: number | null
+  description?: string | null
 }
 export interface MemberRow {
   conversationId: string
@@ -745,6 +749,12 @@ export class Store {
       this.db.exec("INSERT OR IGNORE INTO privacy_exceptions(user_id,target_id,scope,mode) SELECT user_id,target_id,'seenTime',mode FROM privacy_exceptions WHERE scope='lastSeen'")
     }
     this.db.exec("CREATE TABLE IF NOT EXISTS group_invites (id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, from_user TEXT NOT NULL, to_user TEXT NOT NULL, created_at TEXT NOT NULL)")
+    // Bug reports wait here until Telegram has them; see bugreports.ts.
+    this.db.exec("CREATE TABLE IF NOT EXISTS bug_reports (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, text TEXT NOT NULL, diagnostics TEXT, screenshot BLOB, screenshot_type TEXT, created_at TEXT NOT NULL, delivered_at TEXT, attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, last_error TEXT)")
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_bug_reports_pending ON bug_reports(delivered_at, next_attempt_at)")
+    // Several screenshots per report (the screenshot column of bug_reports
+    // holds the single one of reports stored before this table).
+    this.db.exec("CREATE TABLE IF NOT EXISTS bug_report_shots (report_id TEXT NOT NULL, position INTEGER NOT NULL, data BLOB NOT NULL, type TEXT NOT NULL, PRIMARY KEY (report_id, position))")
     for (const sql of [
       "ALTER TABLE messages ADD COLUMN edited_at TEXT",
       "ALTER TABLE messages ADD COLUMN deleted_at TEXT",
@@ -764,6 +774,11 @@ export class Store {
       // heartbeat while online so a crash cannot leave a stale time behind.
       "ALTER TABLE users ADD COLUMN last_seen_at TEXT",
       "ALTER TABLE users ADD COLUMN last_active_at TEXT",
+      // Profiles: a user's "about" text and personal channel, a group's or
+      // channel's description.
+      "ALTER TABLE users ADD COLUMN bio TEXT",
+      "ALTER TABLE users ADD COLUMN personal_channel_id TEXT",
+      "ALTER TABLE conversations ADD COLUMN description TEXT",
     ]) {
       try {
         this.db.exec(sql)
@@ -1149,6 +1164,52 @@ export class Store {
   listDueScheduledMessages(nowIso: string, limit = 200): ScheduledMessageRow[] {
     return this.db.prepare("SELECT * FROM scheduled_messages WHERE send_at<=? ORDER BY send_at ASC, id ASC LIMIT ?").all(nowIso, limit).map(mapScheduled)
   }
+  // --- bug reports ---
+  createBugReport(row: { id: string; userId: string; text: string; diagnostics: string | null; screenshots: BugReportShot[]; createdAt: string }): void {
+    this.db.exec("BEGIN")
+    try {
+      this.db
+        .prepare("INSERT INTO bug_reports(id,user_id,text,diagnostics,created_at,next_attempt_at) VALUES(?,?,?,?,?,?)")
+        .run(row.id, row.userId, row.text, row.diagnostics, row.createdAt, row.createdAt)
+      const shot = this.db.prepare("INSERT INTO bug_report_shots(report_id,position,data,type) VALUES(?,?,?,?)")
+      row.screenshots.forEach((item, position) => shot.run(row.id, position, item.bytes, item.type))
+      this.db.exec("COMMIT")
+    } catch (err) {
+      this.db.exec("ROLLBACK")
+      throw err
+    }
+  }
+  getBugReport(id: string): BugReportRow | null {
+    const r = this.db.prepare("SELECT * FROM bug_reports WHERE id=?").get(id) as Record<string, unknown> | undefined
+    return r ? this.withShots(mapBugReport(r)) : null
+  }
+  private withShots(row: BugReportRow): BugReportRow {
+    const stored = this.db
+      .prepare("SELECT data, type FROM bug_report_shots WHERE report_id=? ORDER BY position ASC")
+      .all(row.id)
+      .map((r) => ({ bytes: Buffer.from((r as Record<string, unknown>).data as Uint8Array), type: String((r as Record<string, unknown>).type) }))
+    return { ...row, screenshots: row.screenshots.concat(stored) }
+  }
+  // Undelivered reports whose next attempt is due, oldest first.
+  listDueBugReports(nowIso: string, maxAttempts: number, limit = 20): BugReportRow[] {
+    return this.db
+      .prepare("SELECT * FROM bug_reports WHERE delivered_at IS NULL AND attempts<? AND (next_attempt_at IS NULL OR next_attempt_at<=?) ORDER BY created_at ASC LIMIT ?")
+      .all(maxAttempts, nowIso, limit)
+      .map((r) => this.withShots(mapBugReport(r as Record<string, unknown>)))
+  }
+  // Screenshots are not kept once Telegram has them.
+  markBugReportDelivered(id: string, at: string, note: string | null): void {
+    this.db.prepare("UPDATE bug_reports SET delivered_at=?, screenshot=NULL, last_error=?, attempts=attempts+1 WHERE id=?").run(at, note, id)
+    this.db.prepare("DELETE FROM bug_report_shots WHERE report_id=?").run(id)
+  }
+  markBugReportFailed(id: string, error: string, nextAttemptAt: string): void {
+    this.db.prepare("UPDATE bug_reports SET attempts=attempts+1, last_error=?, next_attempt_at=? WHERE id=?").run(error.slice(0, 500), nextAttemptAt, id)
+  }
+  deleteDeliveredBugReportsBefore(iso: string): number {
+    this.db.prepare("DELETE FROM bug_report_shots WHERE report_id IN (SELECT id FROM bug_reports WHERE delivered_at IS NOT NULL AND delivered_at<?)").run(iso)
+    return Number(this.db.prepare("DELETE FROM bug_reports WHERE delivered_at IS NOT NULL AND delivered_at<?").run(iso).changes)
+  }
+
   nextScheduledAt(): string | null {
     const r = this.db.prepare("SELECT MIN(send_at) AS at FROM scheduled_messages").get() as Record<string, unknown> | undefined
     return r && r.at != null ? String(r.at) : null
@@ -1388,6 +1449,12 @@ export class Store {
   setUserAvatar(id: string, avatar: string | null): void {
     this.db.prepare("UPDATE users SET avatar=? WHERE id=?").run(avatar, id)
   }
+  setUserBio(id: string, bio: string | null): void {
+    this.db.prepare("UPDATE users SET bio=? WHERE id=?").run(bio, id)
+  }
+  setUserPersonalChannel(id: string, channelId: string | null): void {
+    this.db.prepare("UPDATE users SET personal_channel_id=? WHERE id=?").run(channelId, id)
+  }
 
   // --- sessions ---
   createSession(s: SessionRow): void {
@@ -1439,6 +1506,9 @@ export class Store {
   }
   setConversationAvatar(id: string, avatar: string | null): void {
     this.db.prepare("UPDATE conversations SET avatar=? WHERE id=?").run(avatar, id)
+  }
+  setConversationDescription(id: string, description: string | null): void {
+    this.db.prepare("UPDATE conversations SET description=? WHERE id=?").run(description, id)
   }
   setConversationSelf(id: string): void {
     this.db.prepare("UPDATE conversations SET is_self=1 WHERE id=?").run(id)
@@ -1573,6 +1643,31 @@ export class Store {
   }
   listMembers(conversationId: string): MemberRow[] {
     return this.db.prepare("SELECT * FROM members WHERE conversation_id=?").all(conversationId).map(mapMember)
+  }
+  countMembers(conversationId: string): number {
+    const r = this.db.prepare("SELECT COUNT(*) AS n FROM members WHERE conversation_id=?").get(conversationId) as Record<string, any>
+    return Number(r?.n ?? 0)
+  }
+  // Whether two users are in at least one chat together.
+  sharesConversation(a: string, b: string): boolean {
+    const r = this.db
+      .prepare("SELECT 1 AS ok FROM members m1 JOIN members m2 ON m2.conversation_id=m1.conversation_id AND m2.user_id=? WHERE m1.user_id=? LIMIT 1")
+      .get(b, a)
+    return Boolean(r)
+  }
+  // Groups both users are members of, newest first.
+  listCommonGroups(a: string, b: string, limit = 100): ConversationRow[] {
+    return this.db
+      .prepare("SELECT c.* FROM conversations c JOIN members m1 ON m1.conversation_id=c.id AND m1.user_id=? JOIN members m2 ON m2.conversation_id=c.id AND m2.user_id=? WHERE c.kind='group' ORDER BY c.created_at DESC LIMIT ?")
+      .all(a, b, limit)
+      .map(mapConversation)
+  }
+  // Channels the user can post in: the choices for a personal channel.
+  listChannelsManagedBy(userId: string): ConversationRow[] {
+    return this.db
+      .prepare("SELECT c.* FROM conversations c JOIN members m ON m.conversation_id=c.id AND m.user_id=? WHERE c.kind='channel' AND m.role IN ('owner','admin') ORDER BY c.created_at DESC")
+      .all(userId)
+      .map(mapConversation)
   }
   listConversationIdsForUser(userId: string): string[] {
     return this.db
@@ -1730,6 +1825,8 @@ export class Store {
       "DELETE FROM conversation_key_shares WHERE member_id=?",
       "DELETE FROM key_link_requests WHERE user_id=?",
       "DELETE FROM scheduled_messages WHERE sender_id=?",
+      "DELETE FROM bug_report_shots WHERE report_id IN (SELECT id FROM bug_reports WHERE user_id=?)",
+      "DELETE FROM bug_reports WHERE user_id=?",
       "DELETE FROM webpush_subscriptions WHERE user_id=?",
       "DELETE FROM bot_updates WHERE bot_id=?",
       "DELETE FROM bots WHERE id=?",
@@ -2092,6 +2189,8 @@ function mapUser(r: Record<string, any>): UserRow {
     avatar: r.avatar ?? null,
     isBot: Number(r.is_bot ?? 0) === 1,
     botOwnerId: r.bot_owner_id ?? null,
+    bio: r.bio ?? null,
+    personalChannelId: r.personal_channel_id ?? null,
   }
 }
 function mapSession(r: Record<string, any>): SessionRow {
@@ -2107,7 +2206,7 @@ function mapSession(r: Record<string, any>): SessionRow {
   }
 }
 function mapConversation(r: Record<string, any>): ConversationRow {
-  return { id: r.id, kind: r.kind, title: r.title ?? null, createdBy: r.created_by, createdAt: r.created_at, avatar: r.avatar ?? null, isSelf: Boolean(r.is_self), archivedAt: r.archived_at ?? null, mutedUntil: r.muted_until ?? null, ttlSeconds: r.ttl_seconds ?? null }
+  return { id: r.id, kind: r.kind, title: r.title ?? null, createdBy: r.created_by, createdAt: r.created_at, avatar: r.avatar ?? null, isSelf: Boolean(r.is_self), archivedAt: r.archived_at ?? null, mutedUntil: r.muted_until ?? null, ttlSeconds: r.ttl_seconds ?? null, description: r.description ?? null }
 }
 function mapMember(r: Record<string, any>): MemberRow {
   return { conversationId: r.conversation_id, userId: r.user_id, role: r.role, joinedAt: r.joined_at, archivedAt: r.archived_at ?? null, mutedUntil: r.muted_until ?? null }
@@ -2199,5 +2298,40 @@ function mapConversationKey(r: Record<string, any>): ConversationKeyRow {
     ciphertext: r.ciphertext,
     createdBy: r.created_by,
     createdAt: r.created_at,
+  }
+}
+
+export interface BugReportShot {
+  bytes: Buffer
+  type: string
+}
+
+export interface BugReportRow {
+  id: string
+  userId: string
+  text: string
+  diagnostics: string | null
+  screenshots: BugReportShot[]
+  createdAt: string
+  deliveredAt: string | null
+  attempts: number
+  nextAttemptAt: string | null
+  lastError: string | null
+}
+
+function mapBugReport(r: Record<string, unknown>): BugReportRow {
+  const shot = r.screenshot
+  return {
+    id: String(r.id),
+    userId: String(r.user_id),
+    text: String(r.text),
+    diagnostics: r.diagnostics == null ? null : String(r.diagnostics),
+    // A report stored before bug_report_shots keeps its one screenshot here.
+    screenshots: shot == null ? [] : [{ bytes: Buffer.from(shot as Uint8Array), type: r.screenshot_type == null ? "image/png" : String(r.screenshot_type) }],
+    createdAt: String(r.created_at),
+    deliveredAt: r.delivered_at == null ? null : String(r.delivered_at),
+    attempts: Number(r.attempts ?? 0),
+    nextAttemptAt: r.next_attempt_at == null ? null : String(r.next_attempt_at),
+    lastError: r.last_error == null ? null : String(r.last_error),
   }
 }

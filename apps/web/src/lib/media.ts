@@ -33,6 +33,9 @@ export interface MediaEnvelope {
 	height?: number
 	// Shown blurred until the reader taps it.
 	spoiler?: boolean
+	// Photos and videos sent together: each is its own message, and the
+	// thread draws the ones sharing an album id as one grid (lib/album.ts).
+	album?: { id: string; index: number; count: number }
 	// A bot's buttons under the attachment.
 	buttons?: unknown
 }

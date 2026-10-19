@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { safePreview } from "../lib/imagethumb"
 import type { MediaEnvelope } from "../lib/media"
 import { isVideoMedia } from "../lib/media"
 import { useSettings } from "../state/settings"
@@ -10,7 +11,7 @@ import { IGallery, IEyeOff } from "./m3icons"
 
 // One tile of the grid. Images are decrypted on demand; a video shows the still
 // frame that travelled with the message, so nothing is downloaded to browse.
-function Tile({
+export function GalleryTile({
 	item,
 	onResolveMedia,
 	onOpen,
@@ -31,7 +32,7 @@ function Tile({
 			.catch(() => { if (active) setFailed(true) })
 		return () => { active = false }
 	}, [item.media.fileId, video])
-	const poster = video ? item.media.poster ?? null : url
+	const poster = video ? safePreview(item.media.poster) : url
 	return (
 		<button type="button" className={"gallery-tile" + (revealed ? "" : " spoiler")} onClick={() => (revealed ? onOpen() : setRevealed(true))} title={item.media.name}>
 			{poster ? <img src={poster} alt="" loading="lazy" /> : <span className={"gallery-blank" + (failed ? " failed" : "")} aria-hidden="true" />}
@@ -71,7 +72,7 @@ export function GalleryDialog({
 			) : (
 				<div className="gallery-grid">
 					{items.map((item, index) => (
-						<Tile key={item.media.fileId} item={item} onResolveMedia={onResolveMedia} onOpen={() => onOpen(index)} />
+						<GalleryTile key={item.media.fileId} item={item} onResolveMedia={onResolveMedia} onOpen={() => onOpen(index)} />
 					))}
 				</div>
 			)}

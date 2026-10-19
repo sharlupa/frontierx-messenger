@@ -4,20 +4,27 @@ import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react"
 import type { DisplayMessage, Reaction, PollSummary, ConversationMember } from "../lib/types"
 import { REACTION_SET } from "../lib/reactions"
 import { isAnimatedMedia, isAudioMedia, isVideoMedia, type MediaEnvelope } from "../lib/media"
-import { formatDate, formatTimeOfDay, type Lang, type StringKey } from "../lib/i18n"
+import { formatBytes as formatSize, formatDate, formatTimeOfDay, getActiveLang, type Lang, type StringKey } from "../lib/i18n"
 import { useSettings } from "../state/settings"
+import { BotBadge } from "./BotBadge"
 import { PollCard } from "./PollCard"
 import { EmojiPanel, frequentEmoji, noteEmojiUsed } from "./EmojiPanel"
 import { IconEmoji, IconReply, IconForward, IconMore, IconFile } from "./Icons"
 import { formatDuration, WAVEFORM_BARS } from "../lib/voice"
+import { safePreview } from "../lib/imagethumb"
+import { albumOf, albumRows, groupAlbums, type ThreadUnit } from "../lib/album"
 import { renderRichText, stripFormatting } from "../lib/richtext"
 import { LoadingBlock, LoadingIndicator, MorphBlob, WavyCircle, WavyProgress } from "./Expressive"
 import type { PendingUpload } from "../routes/Chat"
 import { ContactBubble, LocationBubble } from "./RichBubbles"
-import { IBellOff, IBot, IChat, ICopy, IDownload, IEdit, IEyeOff, IForward, ILink, IPin, IPinOff, IReply, ISmilePlus, ITrash } from "./m3icons"
-import { Menu, type MenuItemSpec } from "./m3"
+import { IArrowDown, IBellOff, IChat, ICopy, IDownload, IEdit, IEyeOff, IForward, ILink, IPin, IPinOff, IPlay, IReply, ISmilePlus, ITrash } from "./m3icons"
+import { IconButton, Menu, type MenuItemSpec } from "./m3"
 import { useContextMenuGesture } from "../lib/longpress"
 import type { BotButton } from "../lib/botmsg"
+
+// How long the thread holds on to its end after a send, while the message
+// (or the latest page of history) is on its way.
+const SENT_HOLD_MS = 1500
 const SENDER_COLORS = ["#e17076", "#7bc862", "#65aadd", "#a695e7", "#ee7aae", "#6ec9cb", "#f2a45c"]
 function senderColor(seed: string): string {
 	let hash = 0
@@ -55,11 +62,8 @@ function dayLabel(iso: string, lang: Lang, t: (key: StringKey) => string): strin
 	return formatDate(lang, date, sameYear ? { day: "numeric", month: "long" } : { day: "numeric", month: "long", year: "numeric" })
 }
 
-function formatBytes(size: number): string {
-	if (!size || size < 0) return ""
-	if (size < 1024) return size + " B"
-	if (size < 1024 * 1024) return (size / 1024).toFixed(1) + " KB"
-	return (size / (1024 * 1024)).toFixed(1) + " MB"
+export function formatBytes(size: number): string {
+	return size > 0 ? formatSize(getActiveLang(), size) : ""
 }
 
 function triggerDownload(url: string, name: string) {
@@ -104,6 +108,20 @@ function popoverStyle(anchor: HTMLElement, mine: boolean, estHeight: number, est
     style.maxHeight = Math.max(120, Math.round(spaceBelow - gap))
   }
   return style
+}
+
+// The reaction picker is as wide as the emoji panel, or the whole screen
+// minus a margin on a phone, so it sits centred there instead of hanging off
+// the message.
+const REACTION_PICKER_WIDTH = 360
+const REACTION_PICKER_HEIGHT = 420
+const PICKER_SCREEN_MARGIN = 8
+// Same breakpoint as the phone layout in m3-emoji.css.
+const PHONE_QUERY = "(max-width: 520px)"
+function reactionPickerStyle(anchor: HTMLElement, mine: boolean): CSSProperties {
+  const screenWidth = window.innerWidth - PICKER_SCREEN_MARGIN * 2
+  const width = window.matchMedia(PHONE_QUERY).matches ? screenWidth : Math.min(REACTION_PICKER_WIDTH, screenWidth)
+  return { ...popoverStyle(anchor, mine, REACTION_PICKER_HEIGHT, width), width }
 }
 
 type Grouped = { emoji: string; count: number; mine: boolean }
@@ -331,7 +349,7 @@ function VideoBlock(props: { media: MediaEnvelope; onResolveMedia: (media: Media
 				title={t("playVideo")}
 				aria-label={t("playVideo") + ": " + props.media.name}
 			>
-				{props.media.poster ? <img className="video-poster-img" src={props.media.poster} alt="" /> : <span className="video-poster-blank" aria-hidden="true" />}
+				{safePreview(props.media.poster) ? <img className="video-poster-img" src={safePreview(props.media.poster) ?? undefined} alt="" /> : <span className="video-poster-blank" aria-hidden="true" />}
 				<span className="video-poster-shade" aria-hidden="true" />
 				{loading ? (
 					<span className="video-progress"><WavyCircle value={progress > 0 ? progress : null} size={56} label={t("loadingImage")}>{progress > 0 ? Math.round(progress * 100) : null}</WavyCircle></span>
@@ -419,11 +437,102 @@ function SpoilerCover(props: { onReveal: () => void; poster?: string | null }) {
 	const { t } = useSettings()
 	return (
 		<button type="button" className="media-spoiler" onClick={(event) => { event.stopPropagation(); props.onReveal() }} aria-label={t("spoilerReveal")}>
-			{props.poster ? <img className="media-spoiler-poster" src={props.poster} alt="" /> : null}
+			{safePreview(props.poster) ? <img className="media-spoiler-poster" src={safePreview(props.poster) ?? undefined} alt="" /> : null}
 			<span className="media-spoiler-noise" aria-hidden="true" />
 			<span className="media-spoiler-label"><IEyeOff size={16} /> {t("spoilerLabel")}</span>
 		</button>
 	)
+}
+
+// Photos and videos sent together, as one grid: wide rows for a few, three a
+// row for many (lib/album.ts). Each tile opens the viewer at its own picture;
+// a spoiler tile is revealed on its own.
+// While an album uploads, the photos still on their way take their places in
+// the same grid (pending), so it never assembles itself tile by tile.
+function AlbumGrid(props: { members: DisplayMessage[]; pending?: PendingUpload[]; onResolveMedia: (media: MediaEnvelope, onProgress?: (ratio: number) => void) => Promise<string | null>; onOpenViewer?: (messageId: string) => void }) {
+	type Slot = { key: string; index: number; message?: DisplayMessage; upload?: PendingUpload }
+	const slots: Slot[] = props.members
+		.map((message, at): Slot => ({ key: message.id, index: albumOf(message.media)?.index ?? at, message }))
+		.concat((props.pending ?? []).map((upload, at): Slot => ({ key: upload.id, index: upload.album?.index ?? props.members.length + at, upload })))
+		.sort((a, b) => a.index - b.index)
+	const rows = albumRows(slots.length)
+	let next = 0
+	return (
+		<div className="album-grid">
+			{rows.map((size, row) => {
+				const items = slots.slice(next, next + size)
+				next += size
+				return (
+					<div key={row} className={"album-row n" + size}>
+						{items.map((slot) => {
+							if (slot.upload) return <PendingTile key={slot.key} item={slot.upload} />
+							const message = slot.message
+							return message?.media ? <AlbumTile key={slot.key} media={message.media} onResolveMedia={props.onResolveMedia} onOpen={props.onOpenViewer ? () => props.onOpenViewer?.(message.id) : undefined} /> : null
+						})}
+					</div>
+				)
+			})}
+		</div>
+	)
+}
+
+// A photo of an album still uploading: its own picture, dimmed, with how far
+// it has got (a spinning ring while it waits for its turn).
+function PendingTile(props: { item: PendingUpload }) {
+	const { t } = useSettings()
+	const queued = props.item.stage === "queued"
+	const percent = Math.round(props.item.progress * 100)
+	// Sent in full but not yet in the chat (waiting for the server, or for the
+	// photos before it): a spinning ring rather than a ring stuck at 100.
+	const spinning = queued || props.item.progress <= 0 || props.item.progress >= 1
+	const label = queued ? t("uploadQueued") : props.item.stage === "encrypt" ? t("encrypting") : t("uploading")
+	return (
+		<div className="album-tile pending" role="img" aria-label={label + (queued ? "" : " " + String(percent) + "%") + ": " + props.item.name}>
+			{props.item.poster ? <img className="album-img" src={props.item.poster} alt="" /> : <span className="album-skeleton" aria-hidden="true" />}
+			<span className="album-progress" aria-hidden="true">
+				<WavyCircle value={spinning ? null : props.item.progress} size={40} label={label}>{spinning ? null : percent}</WavyCircle>
+			</span>
+		</div>
+	)
+}
+
+function AlbumTile(props: { media: MediaEnvelope; onResolveMedia: (media: MediaEnvelope, onProgress?: (ratio: number) => void) => Promise<string | null>; onOpen?: () => void }) {
+	const { t } = useSettings()
+	const [revealed, setRevealed] = useState(!props.media.spoiler)
+	const [url, setUrl] = useState<string | null>(null)
+	const video = isVideoMedia(props.media)
+	const poster = safePreview(props.media.poster)
+	useEffect(() => {
+		if (video || !revealed) return
+		let active = true
+		void props.onResolveMedia(props.media).then((resolved) => { if (active) setUrl(resolved) }).catch(() => undefined)
+		return () => { active = false }
+	}, [props.media.fileId, video, revealed])
+	if (!revealed) {
+		return (
+			<div className="album-tile">
+				<SpoilerCover onReveal={() => setRevealed(true)} poster={props.media.poster} />
+			</div>
+		)
+	}
+	const shown = video ? poster : url
+	return (
+		<button type="button" className="album-tile" onClick={props.onOpen} aria-label={(video ? t("playVideo") : t("openImage")) + ": " + props.media.name}>
+			{shown ? <img className="album-img" src={shown} alt="" /> : poster ? <img className="album-img album-blur" src={poster} alt="" /> : null}
+			{!shown && !video ? <span className="album-loader"><LoadingIndicator size={24} label={t("loadingImage")} /></span> : null}
+			{video ? <span className="album-play" aria-hidden="true"><IPlay size={18} /></span> : null}
+		</button>
+	)
+}
+
+// The box a photo or video takes in a bubble, known before the file arrives
+// when the message carries the size: as wide as the picture up to the bubble
+// limit, in its own proportions.
+const MEDIA_BOX_MAX_WIDTH = 280
+function mediaBox(media: MediaEnvelope): CSSProperties {
+	const width = media.width && media.height ? Math.min(MEDIA_BOX_MAX_WIDTH, media.width) : MEDIA_BOX_MAX_WIDTH
+	const ratio = media.width && media.height ? media.width + " / " + media.height : "4 / 3"
+	return { width: width + "px", aspectRatio: ratio }
 }
 
 function MediaBlock(props: { media: MediaEnvelope; onResolveMedia: (media: MediaEnvelope, onProgress?: (ratio: number) => void) => Promise<string | null>; onOpenViewer?: () => void }) {
@@ -431,9 +540,8 @@ function MediaBlock(props: { media: MediaEnvelope; onResolveMedia: (media: Media
 	if (!revealed) {
 		const isVisual = props.media.kind === "image" || isVideoMedia(props.media)
 		if (isVisual) {
-			const ratio = props.media.width && props.media.height ? props.media.width + " / " + props.media.height : "4 / 3"
 			return (
-				<div className="media-image-wrap spoiler-wrap" style={{ aspectRatio: ratio }}>
+				<div className="media-image-wrap spoiler-wrap" style={mediaBox(props.media)}>
 					<SpoilerCover onReveal={() => setRevealed(true)} poster={props.media.poster} />
 				</div>
 			)
@@ -501,10 +609,18 @@ function MediaBlockInner(props: { media: MediaEnvelope; onResolveMedia: (media: 
 					<img
 						src={url}
 						alt={props.media.name}
+						// With the size known the bubble is exactly as wide as the photo.
+						style={props.media.width && props.media.height ? { width: mediaBox(props.media).width } : undefined}
 						className={"bubble-image" + (props.onOpenViewer ? " clickable" : "")}
 						onClick={props.onOpenViewer}
 						role={props.onOpenViewer ? "button" : undefined}
 					/>
+				) : props.media.width && props.media.height ? (
+					// The photo's place is kept, with its blurred preview, while it loads.
+					<div className="media-placeholder" style={mediaBox(props.media)}>
+						{safePreview(props.media.poster) ? <img className="media-placeholder-img" src={safePreview(props.media.poster) ?? undefined} alt="" /> : null}
+						<LoadingIndicator size={36} label={t("loadingImage")} />
+					</div>
 				) : (
 					<div className="media-status media-loading"><LoadingIndicator size={36} label={t("loadingImage")} /></div>
 				)}
@@ -600,10 +716,12 @@ function BotButtons(props: { rows: BotButton[][]; onPress: (button: BotButton) =
 	)
 }
 
+// One tick when sent, two when read: drawn large enough to tell apart at a
+// glance, with a clear gap between the two.
 function TickMark(props: { read: boolean }) {
-	const marks: any[] = [createElement("polyline", { key: "a", points: "2.5 8.5 5.5 11.5 11 5.5" })]
-	if (props.read) marks.push(createElement("polyline", { key: "b", points: "7.5 11.5 13 5.5" }))
-	return createElement("span", { className: "read-ticks" + (props.read ? " read" : "") }, createElement("svg", { viewBox: "0 0 16 16", width: 15, height: 15, fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" }, marks))
+	const marks: any[] = [createElement("polyline", { key: "a", points: "2 8.5 6 12.5 13.5 4.5" })]
+	if (props.read) marks.push(createElement("polyline", { key: "b", points: "12.5 12.5 20 4.5" }))
+	return createElement("span", { className: "read-ticks" + (props.read ? " read" : "") }, createElement("svg", { viewBox: "0 0 22 16", width: 19, height: 14, fill: "none", stroke: "currentColor", strokeWidth: 2, strokeLinecap: "round", strokeLinejoin: "round" }, marks))
 }
 export function MessageThread({
 	messages: allMessages,
@@ -642,8 +760,11 @@ members = [],
 	hasNewer = false,
 	loadingNewer = false,
 	onLoadNewer,
+	onShowLatest,
+	sentAt = 0,
 	onMessageContact,
 	onBotButton,
+	onOpenProfile,
 }: {
 	messages: DisplayMessage[]
 	reactions: Reaction[]
@@ -681,8 +802,13 @@ members?: ConversationMember[]
 	hasNewer?: boolean
 	loadingNewer?: boolean
 	onLoadNewer?: () => void
+	// Back from older history to the latest messages (replacing the window).
+	onShowLatest?: () => void
+	// When this device last sent something to the chat: the thread goes to its end.
+	sentAt?: number
 	onMessageContact?: (username: string) => void
 	onBotButton?: (message: DisplayMessage, button: BotButton) => Promise<void>
+	onOpenProfile?: (userId: string) => void
 }) {
 	const { t, lang } = useSettings()
 	// Deleted messages leave the chat instead of turning into a notice: one that
@@ -771,11 +897,37 @@ members?: ConversationMember[]
 	const dropStick = useCallback(() => {
 		stickUntilRef.current = 0
 	}, [])
+	// Read far enough up (half a screen above the end) and a button offers
+	// the way back down.
+	const [awayFromEnd, setAwayFromEnd] = useState(false)
 	const handleScroll = useCallback(() => {
 		const el = listRef.current
 		if (!el) return
-		atBottomRef.current = el.scrollHeight - el.clientHeight - el.scrollTop < 80
+		const distance = el.scrollHeight - el.clientHeight - el.scrollTop
+		atBottomRef.current = distance < 80
+		setAwayFromEnd(distance > el.clientHeight / 2)
 	}, [])
+	const scrollDown = useCallback(() => {
+		const el = listRef.current
+		if (!el) return
+		// Reading older history opened at a search hit: the latest messages are
+		// not loaded yet, so they are fetched and the chat waits at the end.
+		if (hasNewer && onShowLatest) {
+			atBottomRef.current = true
+			holdBottom(SENT_HOLD_MS)
+			onShowLatest()
+			return
+		}
+		dropStick()
+		el.scrollTo({ top: el.scrollHeight, behavior: document.documentElement.dataset.motion === "reduced" ? "auto" : "smooth" })
+	}, [dropStick, hasNewer, onShowLatest, holdBottom])
+	// Sending from this device brings the chat to its end, wherever it was
+	// read, and keeps it there while the message lands.
+	useEffect(() => {
+		if (!sentAt) return
+		atBottomRef.current = true
+		holdBottom(SENT_HOLD_MS)
+	}, [sentAt, holdBottom])
 	const handleLoadOlder = useCallback(() => {
 		const el = listRef.current
 		restoreRef.current = el ? el.scrollHeight - el.scrollTop : null
@@ -911,15 +1063,45 @@ members?: ConversationMember[]
 	// that day is on screen and leaves with it instead of piling up with the
 	// islands of the other days.
 	const dayGroups = useMemo(() => {
-		const groups: Array<{ key: string; label: string; items: DisplayMessage[] }> = []
+		const groups: Array<{ key: string; label: string; items: DisplayMessage[]; units: ThreadUnit[] }> = []
 		for (const message of messages) {
 			const key = dayKey(message.createdAt)
 			const last = groups.length > 0 ? groups[groups.length - 1] : null
-			if (!last || last.key !== key) groups.push({ key, label: dayLabel(message.createdAt, lang, t), items: [message] })
+			if (!last || last.key !== key) groups.push({ key, label: dayLabel(message.createdAt, lang, t), items: [message], units: [] })
 			else last.items.push(message)
 		}
+		// Photos sent together are drawn as one album.
+		for (const group of groups) group.units = groupAlbums(group.items)
 		return groups
 	}, [messages, lang, t])
+	// The messages of an album, by the id of its first one: downloading or
+	// deleting the album acts on all of them.
+	const albumMembers = useMemo(() => {
+		const map = new Map<string, DisplayMessage[]>()
+		for (const group of dayGroups) for (const unit of group.units) if (unit.members.length > 1) map.set(unit.lead.id, unit.members)
+		return map
+	}, [dayGroups])
+	const membersOf = (message: DisplayMessage): DisplayMessage[] => albumMembers.get(message.id) ?? [message]
+	// Uploads of an album join its grid; an album none of whose photos has
+	// arrived yet is drawn below as a grid of uploads only.
+	const pendingByAlbum = useMemo(() => {
+		const map = new Map<string, PendingUpload[]>()
+		for (const item of pending ?? []) {
+			if (!item.album) continue
+			const list = map.get(item.album.id) ?? []
+			list.push(item)
+			map.set(item.album.id, list)
+		}
+		return map
+	}, [pending])
+	const shownAlbumIds = useMemo(() => {
+		const ids = new Set<string>()
+		for (const group of dayGroups) for (const unit of group.units) {
+			const id = albumOf(unit.lead.media)?.id
+			if (id) ids.add(id)
+		}
+		return ids
+	}, [dayGroups])
 
 	const byMessage = new Map<string, Reaction[]>()
 	for (const reaction of reactions) {
@@ -941,9 +1123,9 @@ members?: ConversationMember[]
 			...(text ? [{ key: "copy", label: t("copy"), icon: <ICopy size={20} />, onSelect: () => void navigator.clipboard?.writeText(stripFormatting(text)).catch(() => undefined) }] : []),
 			...(mine && !message.poll && !message.media && !message.locked && !message.location && !message.contact ? [{ key: "edit", label: t("edit"), icon: <IEdit size={20} />, onSelect: () => onEdit(message) }] : []),
 			...(canModerate ? [{ key: "pin", label: isPinned ? t("unpin") : t("pin"), icon: isPinned ? <IPinOff size={20} /> : <IPin size={20} />, onSelect: () => onTogglePin(message.id, !isPinned) }] : []),
-			...(message.media && !message.locked ? [{ key: "download", label: t("download"), icon: <IDownload size={20} />, onSelect: () => void downloadMedia(message) }] : []),
+			...(message.media && !message.locked ? [{ key: "download", label: t("download"), icon: <IDownload size={20} />, onSelect: () => { for (const item of membersOf(message)) void downloadMedia(item) } }] : []),
 			...(isChannel ? [{ key: "comments", label: t("comments"), icon: <IChat size={20} />, onSelect: () => onOpenComments(message) }] : []),
-			...(mine ? [{ key: "delete", label: t("deleteAction"), icon: <ITrash size={20} />, danger: true, onSelect: () => onDelete(message) }] : []),
+			...(mine ? [{ key: "delete", label: t("deleteAction"), icon: <ITrash size={20} />, danger: true, onSelect: () => { for (const item of membersOf(message)) onDelete(item) } }] : []),
 		]
 	}
 	const contextReactions = (message: DisplayMessage) => {
@@ -973,7 +1155,7 @@ members?: ConversationMember[]
 						const bubble = (row?.querySelector(".bubble") as HTMLElement | null) ?? row
 						setContextMenu(null)
 						if (!bubble) return
-						setPickerStyle(popoverStyle(bubble, message.senderId === currentUserId, 380, 328))
+						setPickerStyle(reactionPickerStyle(bubble, message.senderId === currentUserId))
 						setPickerId(message.id)
 					}}
 				>
@@ -1045,7 +1227,11 @@ members?: ConversationMember[]
 			{dayGroups.map((group) => (
 			<div className="day-group" key={group.key}>
 				<div className="day-divider"><span>{group.label}</span></div>
-				{group.items.map((message) => {
+				{group.units.map(({ lead: message, members: albumItems }) => {
+				const albumId = message.deleted || message.locked ? null : albumOf(message.media)?.id ?? null
+				const albumUploads = albumId ? pendingByAlbum.get(albumId) : undefined
+				const album = albumItems.length > 1 || albumUploads?.length ? albumItems : null
+				const lastMember = albumItems[albumItems.length - 1]
 				const mine = message.senderId === currentUserId
 const sender = members.find((m) => m.userId === message.senderId)
 const senderName = sender ? (sender.displayName || sender.username) : t("unknownUser")
@@ -1062,16 +1248,32 @@ const senderAvatar = sender ? sender.avatar : null
 				const poll = message.poll ? pollsByMessage.get(message.id) ?? null : null
 				const mayClosePoll = message.senderId === currentUserId || canClosePoll
 				return (
-					<div key={message.id} data-message-id={message.id} className={rowClass + (leaving.has(message.id) ? " msg-leaving" : "")} ref={(el) => void (el ? rowRefs.current.set(message.id, el) : rowRefs.current.delete(message.id))}>
+					<div key={message.id} data-message-id={message.id} className={rowClass + (leaving.has(message.id) ? " msg-leaving" : "")} ref={(el) => { for (const item of albumItems) { if (el) rowRefs.current.set(item.id, el); else rowRefs.current.delete(item.id) } }}>
 {!mine ? (
-	senderAvatar ? (
+	onOpenProfile ? (
+		<button
+			type="button"
+			className={"msg-avatar msg-avatar-btn" + (senderAvatar ? "" : " msg-avatar-fallback")}
+			style={senderAvatar ? undefined : { backgroundColor: senderColor(message.senderId) }}
+			onClick={(event) => { event.stopPropagation(); onOpenProfile(message.senderId) }}
+			aria-label={t("openProfile") + ": " + senderName}
+			title={senderName}
+		>
+			{senderAvatar ? <img src={senderAvatar} alt="" /> : senderInitials(senderName)}
+		</button>
+	) : senderAvatar ? (
 		<img className="msg-avatar" src={senderAvatar} alt={senderName} />
 	) : (
 		<div className="msg-avatar msg-avatar-fallback" style={{ backgroundColor: senderColor(message.senderId) }}>{senderInitials(senderName)}</div>
 	)
 ) : null}
 						<div className={bubbleClass}>
-{!mine ? <div className="bubble-sender" style={{ color: senderColor(message.senderId) }}>{senderName}{sender?.isBot ? <span className="bot-badge"><IBot size={11} /> BOT</span> : null}</div> : null}
+{!mine ? (
+	<div className="bubble-sender" style={{ color: senderColor(message.senderId) }}>
+		{onOpenProfile ? <button type="button" className="bubble-sender-link" onClick={(event) => { event.stopPropagation(); onOpenProfile(message.senderId) }}>{senderName}</button> : senderName}
+		{sender?.isBot ? <BotBadge /> : null}
+	</div>
+) : null}
 							{parent ? (
 								<ReplyPreview parent={parent} onResolveMedia={onResolveMedia} onJump={() => jumpTo(parent.id)} />
 							) : null}
@@ -1084,8 +1286,15 @@ const senderAvatar = sender ? sender.avatar : null
 									)
 								) : message.media && !message.deleted && !message.locked ? (
 									<div>
-										<MediaBlock media={message.media} onResolveMedia={onResolveMedia} onOpenViewer={onOpenViewer ? () => onOpenViewer(message.id) : undefined} />
-										{message.media.caption ? <div className="bubble-caption">{renderRichText(message.media.caption, isKnownMention)}</div> : null}
+										{album ? (
+											<AlbumGrid members={album} pending={albumUploads} onResolveMedia={onResolveMedia} onOpenViewer={onOpenViewer} />
+										) : (
+											<MediaBlock media={message.media} onResolveMedia={onResolveMedia} onOpenViewer={onOpenViewer ? () => onOpenViewer(message.id) : undefined} />
+										)}
+										{(() => {
+											const caption = albumItems.map((item) => item.media?.caption).find(Boolean)
+											return caption ? <div className="bubble-caption">{renderRichText(caption, isKnownMention)}</div> : null
+										})()}
 									</div>
 								) : message.location && !message.deleted && !message.locked ? (
 									<LocationBubble location={message.location} />
@@ -1109,7 +1318,7 @@ const senderAvatar = sender ? sender.avatar : null
 								{isPinned ? <div className="pinned-marker">{t("pinned")}</div> : null}
 								{message.silent ? <span className="silent-marker" title={t("silentShort")} aria-label={t("silentShort")}><IBellOff size={12} /></span> : null}
 								<div>{formatTimeOfDay(lang, message.createdAt)}</div>
-								{createElement(TickMark, { read: Boolean(readIds && readIds.has(message.id)) })}
+								{createElement(TickMark, { read: Boolean(readIds && readIds.has(lastMember.id)) })}
 								{message.editedAt && !message.deleted ? <div className="edited">{t("edited")}</div> : null}
 							</div>
 							{grouped.length > 0 ? (
@@ -1129,15 +1338,15 @@ const senderAvatar = sender ? sender.avatar : null
 						</div>
 						{message.deleted ? null : (
 							<div className="msg-actions">
-								<button className="msg-act" title={t("addReaction")} aria-label={t("addReaction")} onClick={(event) => { const open = pickerId !== message.id; setPickerStyle(open ? popoverStyle(event.currentTarget, mine, 380, 328) : null); setPickerId(open ? message.id : null); setMenuId(null) }}><IconEmoji /></button>
+								<button className="msg-act" title={t("addReaction")} aria-label={t("addReaction")} onClick={(event) => { const open = pickerId !== message.id; setPickerStyle(open ? reactionPickerStyle(event.currentTarget, mine) : null); setPickerId(open ? message.id : null); setMenuId(null) }}><IconEmoji /></button>
 								<button className="msg-act" title={t("reply")} aria-label={t("reply")} onClick={() => onReply(message)}><IconReply /></button>
 								<button className="msg-act" title={t("forward")} aria-label={t("forward")} onClick={() => onForward(message)}><IconForward /></button>
 								<button className="msg-act" title={t("more")} aria-label={t("more")} onClick={(event) => { const open = menuId !== message.id; setMenuStyle(open ? popoverStyle(event.currentTarget, mine, 210) : null); setMenuId(open ? message.id : null); setPickerId(null) }}><IconMore /></button>
 								{menuId === message.id ? (createPortal(
 									<div className="msg-menu" style={menuStyle ?? undefined}>
-										{message.media && !message.locked ? <button className="msg-menu-item" onClick={() => { setMenuId(null); void downloadMedia(message) }}>{t("download")}</button> : null}
+										{message.media && !message.locked ? <button className="msg-menu-item" onClick={() => { setMenuId(null); for (const item of albumItems) void downloadMedia(item) }}>{t("download")}</button> : null}
 										{mine && !message.poll && !message.media ? <button className="msg-menu-item" onClick={() => { setMenuId(null); onEdit(message) }}>{t("edit")}</button> : null}
-										{mine ? <button className="msg-menu-item" onClick={() => { setMenuId(null); onDelete(message) }}>{t("deleteAction")}</button> : null}
+										{mine ? <button className="msg-menu-item" onClick={() => { setMenuId(null); for (const item of albumItems) onDelete(item) }}>{t("deleteAction")}</button> : null}
 										{canModerate ? <button className="msg-menu-item" onClick={() => { setMenuId(null); onTogglePin(message.id, !isPinned) }}>{isPinned ? t("unpin") : t("pin")}</button> : null}
 										{isChannel ? <button className="msg-menu-item" onClick={() => { setMenuId(null); onOpenComments(message) }}>{t("comments")}</button> : null}
 									</div>
@@ -1174,7 +1383,20 @@ const senderAvatar = sender ? sender.avatar : null
 					</div>
 				</div>
 			))}
-			{pending.map((item) => (
+			{[...pendingByAlbum.entries()].filter(([id]) => !shownAlbumIds.has(id)).map(([id, uploads]) => (
+				<div key={"album-" + id} className="message-row mine msg-enter">
+					<div className="bubble mine">
+						<div className="bubble-text">
+							<AlbumGrid members={[]} pending={uploads} onResolveMedia={onResolveMedia} />
+							{(() => {
+								const caption = uploads.map((item) => item.caption).find(Boolean)
+								return caption ? <div className="bubble-caption">{renderRichText(caption, isKnownMention)}</div> : null
+							})()}
+						</div>
+					</div>
+				</div>
+			))}
+			{pending.filter((item) => !item.album).map((item) => (
 				<div key={item.id} className="message-row mine msg-enter">
 					<div className="bubble mine">
 						<div className="bubble-text">
@@ -1183,7 +1405,7 @@ const senderAvatar = sender ? sender.avatar : null
 								<div className="upload-main">
 									<div className="upload-name">{item.name}</div>
 									<div className="upload-stage">
-										{item.stage === "encrypt" ? t("encrypting") : t("uploading")} {Math.round(item.progress * 100)}% · {formatBytes(item.size)}
+										{item.stage === "queued" ? t("uploadQueued") : (item.stage === "encrypt" ? t("encrypting") : t("uploading")) + " " + String(Math.round(item.progress * 100)) + "%"} · {formatBytes(item.size)}
 									</div>
 									<WavyProgress className="upload-wavy" value={item.progress > 0 ? item.progress : null} label={item.stage === "encrypt" ? t("encrypting") : t("uploading")} />
 								</div>
@@ -1201,6 +1423,13 @@ const senderAvatar = sender ? sender.avatar : null
 			) : null}
 			{typingLabel ? <div className="typing"><span className="typing-dots" aria-hidden="true"><i /><i /><i /></span>{typingLabel}</div> : null}
 			<div ref={endRef} />
+			{awayFromEnd || (hasNewer && onShowLatest) ? (
+				<div className="jump-down-dock">
+					<IconButton className="jump-down" variant="tonal" label={t("scrollToLatest")} onClick={scrollDown}>
+						<IArrowDown size={22} />
+					</IconButton>
+				</div>
+			) : null}
 		</div>
 	)
 }

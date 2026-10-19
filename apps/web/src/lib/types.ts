@@ -24,6 +24,9 @@ export type User = {
 	publicKey?: string | null
 	avatar?: string | null
 	isBot?: boolean
+	// Present on the signed-in user's own record.
+	bio?: string | null
+	personalChannelId?: string | null
 }
 
 export type AuthResult = { token: string; user: User }
@@ -52,6 +55,19 @@ export type Conversation = {
 	ttlSeconds?: number | null
 	// Your own scheduled messages waiting in this chat.
 	scheduledCount?: number
+	// What a group or channel is about, set by its moderators.
+	description?: string | null
+}
+
+// A chat as shown on a profile: someone's channel or a group in common.
+export type ProfileChat = { id: string; kind?: ConversationKind; title: string | null; avatar: string | null; memberCount: number; description?: string | null; isMember?: boolean }
+export type UserProfile = {
+	user: { id: string; username: string; displayName: string; avatar: string | null; bio: string | null; isBot: boolean }
+	online: boolean
+	lastSeenAt: string | null
+	personalChannel: ProfileChat | null
+	directConversationId: string | null
+	commonGroups: ProfileChat[]
 }
 export type ConversationFolder = { id: string; userId: string; name: string; createdAt: string; conversationIds: string[] }
 
@@ -130,21 +146,23 @@ export type WsEvent =
 	| { type: "group.invite"; invite: GroupInvite }
 	| { type: "file.state_changed"; fileAssetId: string; replicaId: string; state: ReplicaState; tempExpiresAt: string | null }
 	| { type: "call.invite"; conversationId: string; callId: string; from: string; media: CallMedia; at: string }
-	| { type: "call.participants"; conversationId: string; callId: string; participants: string[] }
+	| { type: "call.participants"; conversationId: string; callId: string; participants: string[]; muted?: string[] }
+	| { type: "call.mute"; conversationId: string; callId: string; userId: string; muted: boolean }
 	| { type: "call.joined"; conversationId: string; callId: string; userId: string }
 	| { type: "call.left"; conversationId: string; callId: string; userId: string }
 	| { type: "call.ended"; conversationId: string; callId: string }
 	| { type: "call.signal"; conversationId: string; callId: string; from: string; to: string; data: unknown }
 	| { type: "user.profile_updated"; userId: string; displayName: string; avatar: string | null }
-	| { type: "conversation.profile_updated"; conversationId: string; title: string | null; avatar: string | null }
+	| { type: "conversation.profile_updated"; conversationId: string; title: string | null; avatar: string | null; description?: string | null }
 	| { type: "friend.request"; requestId: string; fromUser: string; toUser: string }
 	| { type: "friend.accepted"; conversation: Conversation }
 	| { type: "friend.declined"; requestId: string }
 	| { type: "friend.removed"; conversationId: string; by: string }
 	| { type: "conversation.added"; conversation: Conversation }
-	| { type: "conversation.deleted"; conversationId: string }
+	// removedBy and title: a moderator took this user out of the group or channel.
+	| { type: "conversation.deleted"; conversationId: string; removedBy?: string; title?: string | null }
 	| { type: "member.added"; conversationId: string; userId: string }
-	| { type: "member.removed"; conversationId: string; userId: string }
+	| { type: "member.removed"; conversationId: string; userId: string; removedBy?: string }
 	| { type: "keys.shares_needed"; conversationId: string }
 	| { type: "keys.epoch_created"; conversationId: string; keyId: string; createdBy: string }
 	| { type: "keys.shares_added"; conversationId: string; keyIds: string[] }
@@ -157,7 +175,7 @@ export type WsEvent =
 
 export type CallMedia = "audio"
 
-export interface CallState { callId: string; conversationId: string; media: CallMedia; startedBy: string; startedAt: string; participants: string[] }
+export interface CallState { callId: string; conversationId: string; media: CallMedia; startedBy: string; startedAt: string; participants: string[]; muted?: string[] }
 
 export type DisplayMessage = {
 	id: string

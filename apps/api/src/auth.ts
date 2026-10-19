@@ -20,6 +20,9 @@ export interface PublicUser {
   publicKey: string | null
   avatar: string | null
   isBot?: boolean
+  // Only in the signed-in user's own copy.
+  bio?: string | null
+  personalChannelId?: string | null
 }
 export interface AuthResult {
   token: string
@@ -30,6 +33,11 @@ export function publicUser(u: UserRow): PublicUser {
   const out: PublicUser = { id: u.id, username: u.username, displayName: u.displayName, publicKey: u.publicKey ?? null, avatar: u.avatar ?? null }
   if (u.isBot) out.isBot = true
   return out
+}
+
+// The signed-in user's own record also carries the profile fields they edit.
+export function selfUser(u: UserRow): PublicUser {
+  return { ...publicUser(u), bio: u.bio ?? null, personalChannelId: u.personalChannelId ?? null }
 }
 
 export function hashToken(token: string): string {
@@ -84,7 +92,7 @@ export function register(store: Store, username: string, password: string, displ
     avatar: null,
   }
   store.createUser(user)
-  return { token: issueSession(store, user.id, sessionLabel, deviceId), user: publicUser(user) }
+  return { token: issueSession(store, user.id, sessionLabel, deviceId), user: selfUser(user) }
 }
 
 export function login(store: Store, username: string, password: string, sessionLabel?: string, deviceId?: string): AuthResult {
@@ -92,7 +100,7 @@ export function login(store: Store, username: string, password: string, sessionL
   if (!user || !verifyPassword(password, user.passwordHash)) {
     throw new HttpError(401, "invalid credentials")
   }
-  return { token: issueSession(store, user.id, sessionLabel, deviceId), user: publicUser(user) }
+  return { token: issueSession(store, user.id, sessionLabel, deviceId), user: selfUser(user) }
 }
 
 export function authenticateSession(store: Store, authHeader: string | undefined): SessionRow {

@@ -4,9 +4,10 @@ import { BlobTooLargeError, blobByteLength, deleteBlob, freeDiskBytes, hasBlob, 
 import { buildLinkPreview, fetchPreviewImage } from "./linkpreview.js"
 import { HttpError } from "./errors.js"
 import { DISK_RESERVE_BYTES, MAX_BLOB_BYTES, MAX_FILE_BYTES, STICKER_GIF_QUOTA_BYTES, TEMP_BACKUP_QUOTA_BYTES, USER_STORAGE_QUOTA_BYTES } from "./limits.js"
-import { Store, type KeySlotRow, type MessageRow, type ReplicaRow, type MemberRow, type PollRow, type PollSnapshot, type ConversationRow, type FriendRequestRow, type PrivacyPolicy, type PrivacyScope } from "./store.js"
+import { Store, type KeySlotRow, type MessageRow, type ReplicaRow, type MemberRow, type PollRow, type PollSnapshot, type ConversationRow, type UserRow, type FriendRequestRow, type PrivacyPolicy, type PrivacyScope } from "./store.js"
 import { EventBus } from "./eventbus.js"
-import { CallRegistry, iceServersFromEnv } from "./calls.js"
+import { CALL_RECONNECT_GRACE_MS, CallRegistry, iceServersFromEnv } from "./calls.js"
+import { BUG_REPORT_MAX_ATTEMPTS, BUG_REPORT_MAX_BODY_BYTES, BUG_REPORT_REQUESTS_PER_HOUR_PER_IP, BUG_REPORTS_PER_HOUR, BUG_REPORT_MAX_TEXT, BUG_REPORT_MIN_TEXT, BUG_REPORT_RETENTION_DAYS, deliverBugReport, parseScreenshots, retryDelayMinutes, sanitizeDiagnostics, telegramTargetFromEnv, type Diagnostics, type TelegramTarget } from "./bugreports.js"
 import * as authmod from "./auth.js"
 import { createHash, randomInt, timingSafeEqual } from "node:crypto"
 import { hashPassword, verifyPassword } from "@frontierx/crypto"
@@ -34,6 +35,9 @@ export interface App {
   // Sends scheduled messages whose time has come; server.ts calls it every few
   // seconds. Returns how many were delivered.
   deliverDueScheduled: (now?: number) => number
+  // Forwards bug reports that are due to Telegram and drops old delivered
+  // ones; server.ts calls it every few minutes.
+  deliverBugReports: (now?: number) => Promise<number>
   bots: BotHub
 }
 
@@ -46,6 +50,11 @@ export interface CreateAppOptions {
     userStorageQuotaBytes?: number
     diskReserveBytes?: number
   }
+  // How long a dropped connection keeps its user in a call; see calls.ts.
+  callReconnectGraceMs?: number
+  // Where bug reports go (null: keep them only). Defaults to the environment.
+  bugReportTarget?: TelegramTarget | null
+  fetch?: typeof fetch
 }
 
 export function createApp(options: CreateAppOptions = {}): App {
@@ -63,14 +72,57 @@ export function createApp(options: CreateAppOptions = {}): App {
     }
     broadcastPresence(userId)
   })
+  // Takes a user out of one conversation's call (left the chat, was removed
+  // from it) and tells everyone who still cares.
+  const dropFromCall = (conversationId: string, userId: string, notify: string[]): void => {
+    const { state, removed, ended, callId } = calls.leave(conversationId, userId)
+    if (!removed || !callId) return
+    bus.publishToUsers(notify.filter((id) => id !== userId), { type: "call.left", conversationId, callId, userId } as WsEvent)
+    if (ended) bus.publishToUsers(notify, { type: "call.ended", conversationId, callId } as WsEvent)
+    else if (state) bus.publishToUsers(notify, { type: "call.participants", conversationId, callId, participants: state.participants, muted: state.muted } as WsEvent)
+  }
+  // Someone leaves a group or channel, or a moderator (removedBy) takes them
+  // out. They are dropped from its call and lose the chat on every device;
+  // new messages get a key they never had.
+  const removeFromConversation = (conversationId: string, userId: string, removedBy: string | null): void => {
+    const before = store.listMembers(conversationId).map((m) => m.userId)
+    store.removeMember(conversationId, userId)
+    dropFromCall(conversationId, userId, before)
+    store.markRekeyNeeded(conversationId)
+    const conversation = store.getConversation(conversationId)
+    const gone = removedBy ? { type: "conversation.deleted", conversationId, removedBy, title: conversation?.title ?? null } : { type: "conversation.deleted", conversationId }
+    bus.publishToUsers([userId], gone as unknown as WsEvent)
+    const remaining = before.filter((id) => id !== userId)
+    bus.publishToUsers(remaining, { type: "member.removed", conversationId, userId, ...(removedBy ? { removedBy } : {}) } as unknown as WsEvent)
+    if (removedBy && store.isBot(userId)) botHub.notifyBot(userId, { type: "conversation_removed", conversationId })
+  }
   // Calls end when the user's last connection is gone. Stepping away from the
-  // tab only hides the online status; the call carries on.
-  const startCallCleanup = () => bus.setDisconnectListener((userId) => {
+  // tab only hides the online status; the call carries on. A connection that
+  // comes back within the grace period keeps its place.
+  const callGraceMs = options.callReconnectGraceMs ?? CALL_RECONNECT_GRACE_MS
+  const pendingCallDrops = new Map<string, ReturnType<typeof setTimeout>>()
+  const dropFromAllCalls = (userId: string): void => {
     for (const affected of calls.leaveAll(userId)) {
       const callMembers = store.listMembers(affected.conversationId).map((member) => member.userId)
       bus.publishToUsers(callMembers, { type: "call.left", conversationId: affected.conversationId, callId: affected.callId, userId } as WsEvent)
       if (affected.ended) bus.publishToUsers(callMembers, { type: "call.ended", conversationId: affected.conversationId, callId: affected.callId } as WsEvent)
+      else if (affected.state) bus.publishToUsers(callMembers, { type: "call.participants", conversationId: affected.conversationId, callId: affected.callId, participants: affected.state.participants, muted: affected.state.muted } as WsEvent)
     }
+  }
+  const startCallCleanup = () => bus.setDisconnectListener((userId) => {
+    if (!calls.isInAnyCall(userId)) return
+    if (callGraceMs <= 0) {
+      dropFromAllCalls(userId)
+      return
+    }
+    const previous = pendingCallDrops.get(userId)
+    if (previous) clearTimeout(previous)
+    const timer = setTimeout(() => {
+      pendingCallDrops.delete(userId)
+      if (!bus.isUserOnline(userId)) dropFromAllCalls(userId)
+    }, callGraceMs)
+    timer.unref?.()
+    pendingCallDrops.set(userId, timer)
   })
   const lifecycle = new FileLifecycle(new SystemClock())
   const router = new Router()
@@ -194,6 +246,34 @@ export function createApp(options: CreateAppOptions = {}): App {
       throw new HttpError(403, "moderator permission is required")
     }
     return member
+  }
+  // --- profiles ---
+  const MAX_BIO = 200
+  const MAX_DESCRIPTION = 500
+  // Profile text keeps line breaks (at most one empty line in a row) and loses
+  // other control characters.
+  const cleanProfileText = (value: string): string =>
+    value
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+  const managedChannel = (channelId: string, userId: string): ConversationRow | null => {
+    const channel = store.getConversation(channelId)
+    if (!channel || channel.kind !== "channel") return null
+    const member = store.getMember(channelId, userId)
+    return member && (member.role === "owner" || member.role === "admin") ? channel : null
+  }
+  // The linked channel counts only while its owner still runs it.
+  const personalChannelOf = (user: UserRow): ConversationRow | null =>
+    user.personalChannelId ? managedChannel(user.personalChannelId, user.id) : null
+  const profileTarget = (viewerId: string, targetId: string): UserRow => {
+    const target = store.getUserById(targetId)
+    if (!target) throw new HttpError(404, "user not found")
+    if (target.id === viewerId) return target
+    const related = store.sharesConversation(viewerId, target.id) || Boolean(store.getFriendRequestPair(viewerId, target.id)) || Boolean(store.getFriendRequestPair(target.id, viewerId))
+    if (!related) throw new HttpError(404, "user not found")
+    return target
   }
   const requireCanSend = (conversationId: string, userId: string): MemberRow => {
     const member = requireMember(conversationId, userId)
@@ -735,12 +815,25 @@ export function createApp(options: CreateAppOptions = {}): App {
     requireMember(conversationId, userId)
     const conversation = store.getConversation(conversationId)
     if (!conversation || conversation.kind === "direct") throw new HttpError(409, "you can only leave groups and channels")
-    store.removeMember(conversationId, userId)
-    // New messages get a key the person who left never had.
-    store.markRekeyNeeded(conversationId)
-    bus.publishToUsers([userId], { type: "conversation.deleted", conversationId } as unknown as WsEvent)
-    const remaining = store.listMembers(conversationId).map((m) => m.userId)
-    bus.publishToUsers(remaining, { type: "member.removed", conversationId, userId } as unknown as WsEvent)
+    removeFromConversation(conversationId, userId, null)
+    sendJson(ctx.res, 200, { ok: true })
+  })
+  // Owners remove anyone but themselves; admins remove ordinary and read-only
+  // members, not other admins.
+  router.post("/api/conversations/:id/members/:memberId/remove", (ctx) => {
+    const userId = requireAuth(ctx)
+    const conversationId = ctx.params.id
+    const actor = requireMember(conversationId, userId)
+    const conversation = store.getConversation(conversationId)
+    if (!conversation || conversation.kind === "direct") throw new HttpError(409, "members are managed only in groups and channels")
+    if (actor.role !== "owner" && actor.role !== "admin") throw new HttpError(403, "moderator permission is required")
+    rateLimit("member-remove:" + userId, 60, 60000)
+    const target = store.getMember(conversationId, ctx.params.memberId)
+    if (!target) throw new HttpError(404, "member not found")
+    if (target.userId === userId) throw new HttpError(409, "use leave to quit the conversation yourself")
+    if (target.role === "owner") throw new HttpError(403, "the owner cannot be removed")
+    if (target.role === "admin" && actor.role !== "owner") throw new HttpError(403, "only the owner can remove administrators")
+    removeFromConversation(conversationId, target.userId, userId)
     sendJson(ctx.res, 200, { ok: true })
   })
   router.post("/api/conversations/:id/delete", (ctx) => {
@@ -792,7 +885,7 @@ export function createApp(options: CreateAppOptions = {}): App {
     const invite = requireLiveInvite(ctx.params.code)
     const conversation = store.getConversation(invite.conversationId)
     if (!conversation) throw new HttpError(404, "conversation not found")
-    sendJson(ctx.res, 200, { code: invite.code, kind: conversation.kind, title: conversation.title, avatar: conversation.avatar ?? null, expiresAt: invite.expiresAt ?? null })
+    sendJson(ctx.res, 200, { code: invite.code, kind: conversation.kind, title: conversation.title, avatar: conversation.avatar ?? null, description: conversation.description ?? null, expiresAt: invite.expiresAt ?? null })
   })
   router.post("/api/invites/:code/join", (ctx) => {
     const userId = requireAuth(ctx)
@@ -925,7 +1018,7 @@ export function createApp(options: CreateAppOptions = {}): App {
     const userId = requireAuth(ctx)
     const user = store.getUserById(userId)
     if (!user) throw new HttpError(404, "user not found")
-    sendJson(ctx.res, 200, { user: authmod.publicUser(user) })
+    sendJson(ctx.res, 200, { user: authmod.selfUser(user) })
   })
   const readPolicy = (value: unknown, fallback: PrivacyPolicy): PrivacyPolicy => {
     if (value === undefined || value === null) return fallback
@@ -1001,17 +1094,87 @@ export function createApp(options: CreateAppOptions = {}): App {
     store.deleteGroupInvite(invite.id)
     sendJson(ctx.res, 200, { ok: true })
   })
+  // Every field is optional; only the ones sent change.
   router.post("/api/me/profile", async (ctx) => {
     const userId = requireAuth(ctx)
     const b = await readJson(ctx.req)
-    const displayName = String(b.displayName ?? "").trim()
-    if (!displayName || displayName.length > 64) {
-      throw new HttpError(400, "displayName must contain 1-64 characters")
+    if (b.displayName !== undefined) {
+      const displayName = String(b.displayName ?? "").trim()
+      if (!displayName || displayName.length > 64) {
+        throw new HttpError(400, "displayName must contain 1-64 characters")
+      }
+      store.updateUserDisplayName(userId, displayName)
     }
-    store.updateUserDisplayName(userId, displayName)
+    if (b.bio !== undefined) {
+      const bio = b.bio === null ? "" : cleanProfileText(String(b.bio))
+      if (bio.length > MAX_BIO) throw new HttpError(400, "bio must be at most " + MAX_BIO + " characters")
+      store.setUserBio(userId, bio || null)
+    }
+    if (b.personalChannelId !== undefined) {
+      const channelId = b.personalChannelId === null || b.personalChannelId === "" ? null : String(b.personalChannelId)
+      if (channelId && !managedChannel(channelId, userId)) throw new HttpError(400, "personal channel must be a channel you own or administer")
+      store.setUserPersonalChannel(userId, channelId)
+    }
     const user = store.getUserById(userId)
     if (!user) throw new HttpError(404, "user not found")
-    sendJson(ctx.res, 200, { user: authmod.publicUser(user) })
+    if (b.displayName !== undefined) {
+      for (const conversationId of store.listConversationIdsForUser(userId)) {
+        const memberIds = store.listMembers(conversationId).map((m) => m.userId)
+        bus.publishToUsers(memberIds, { type: "user.profile_updated", userId, displayName: user.displayName, avatar: user.avatar } as unknown as WsEvent)
+      }
+    }
+    sendJson(ctx.res, 200, { user: authmod.selfUser(user) })
+  })
+  router.get("/api/me/channels", (ctx) => {
+    const userId = requireAuth(ctx)
+    const channels = store.listChannelsManagedBy(userId).map((c) => ({ id: c.id, title: c.title, avatar: c.avatar ?? null, memberCount: store.countMembers(c.id) }))
+    sendJson(ctx.res, 200, { channels })
+  })
+  // A profile is shown to people who share a chat with its owner or have a
+  // friend request between them; to anyone else the user does not exist.
+  router.get("/api/users/:id/profile", (ctx) => {
+    const viewerId = requireAuth(ctx)
+    rateLimit("profile:" + viewerId, 240, 60000)
+    const target = profileTarget(viewerId, ctx.params.id)
+    const self = target.id === viewerId
+    const channel = personalChannelOf(target)
+    const bot = target.isBot ? store.getBot(target.id) : null
+    const direct = self ? null : store.findDirectConversationBetween(viewerId, target.id)
+    const commonGroups = self
+      ? []
+      : store.listCommonGroups(viewerId, target.id).map((c) => ({ id: c.id, kind: c.kind, title: c.title, avatar: c.avatar ?? null, memberCount: store.countMembers(c.id) }))
+    sendJson(ctx.res, 200, {
+      user: {
+        id: target.id,
+        username: target.username,
+        displayName: target.displayName,
+        avatar: target.avatar ?? null,
+        bio: target.isBot ? bot?.description ?? null : target.bio ?? null,
+        isBot: Boolean(target.isBot),
+      },
+      online: self ? true : bus.isUserVisible(target.id) && canSeeOnline(target.id, viewerId),
+      lastSeenAt: self ? null : lastSeenFor(target.id, viewerId),
+      personalChannel: channel
+        ? { id: channel.id, title: channel.title, avatar: channel.avatar ?? null, description: channel.description ?? null, memberCount: store.countMembers(channel.id), isMember: Boolean(store.getMember(channel.id, viewerId)) }
+        : null,
+      directConversationId: direct ? direct.id : null,
+      commonGroups,
+    })
+  })
+  // Joining someone's personal channel from their profile: the profile is the
+  // invitation, so the same people who may see it may join.
+  router.post("/api/users/:id/channel/join", (ctx) => {
+    const viewerId = requireAuth(ctx)
+    rateLimit("channel-join:" + viewerId, 30, 60000)
+    const target = profileTarget(viewerId, ctx.params.id)
+    const channel = personalChannelOf(target)
+    if (!channel) throw new HttpError(404, "channel not found")
+    if (!store.getMember(channel.id, viewerId)) {
+      store.addMember({ conversationId: channel.id, userId: viewerId, role: "member", joinedAt: new Date().toISOString() })
+      const existingIds = store.listMembers(channel.id).map((m) => m.userId).filter((id) => id !== viewerId)
+      bus.publishToUsers(existingIds, { type: "member.added", conversationId: channel.id, userId: viewerId } as unknown as WsEvent)
+    }
+    sendJson(ctx.res, 200, { conversation: store.getConversation(channel.id) })
   })
   router.post("/api/me/avatar", async (ctx) => {
     const userId = requireAuth(ctx)
@@ -1026,7 +1189,7 @@ export function createApp(options: CreateAppOptions = {}): App {
       const memberIds = store.listMembers(conversationId).map((m) => m.userId)
       bus.publishToUsers(memberIds, { type: "user.profile_updated", userId, displayName: user.displayName, avatar: user.avatar } as unknown as WsEvent)
     }
-    sendJson(ctx.res, 200, { user: authmod.publicUser(user) })
+    sendJson(ctx.res, 200, { user: authmod.selfUser(user) })
   })
   router.get("/api/me/stickers", (ctx) => {
     const userId = requireAuth(ctx)
@@ -1307,9 +1470,14 @@ export function createApp(options: CreateAppOptions = {}): App {
       if (avatarValue && !isImageDataUrl(avatarValue)) throw new HttpError(400, "avatar must be an image data url")
       store.setConversationAvatar(conversationId, avatarValue)
     }
+    if (b.description !== undefined) {
+      const description = b.description === null ? "" : cleanProfileText(String(b.description))
+      if (description.length > MAX_DESCRIPTION) throw new HttpError(400, "description must be at most " + MAX_DESCRIPTION + " characters")
+      store.setConversationDescription(conversationId, description || null)
+    }
     const updated = store.getConversation(conversationId)
     const memberIds = store.listMembers(conversationId).map((m) => m.userId)
-    bus.publishToUsers(memberIds, { type: "conversation.profile_updated", conversationId, title: updated?.title ?? null, avatar: updated?.avatar ?? null } as unknown as WsEvent)
+    bus.publishToUsers(memberIds, { type: "conversation.profile_updated", conversationId, title: updated?.title ?? null, avatar: updated?.avatar ?? null, description: updated?.description ?? null } as unknown as WsEvent)
     sendJson(ctx.res, 200, { conversation: updated })
   })
   router.get("/api/conversations/:id/draft", (ctx) => {
@@ -1649,29 +1817,39 @@ export function createApp(options: CreateAppOptions = {}): App {
       bus.publishToUsers(rung, { type: "call.invite", conversationId, callId: state.callId, from: userId, media: "audio", at: now } as WsEvent)
     }
     if (created) notifyCallPush(conversationId, userId, rung)
-    if (!alreadyIn) {
-      const existing = state.participants.filter((id) => id !== userId)
-      bus.publishToUsers(existing, { type: "call.joined", conversationId, callId: state.callId, userId } as WsEvent)
-    }
-    bus.publishToUsers(state.participants, { type: "call.participants", conversationId, callId: state.callId, participants: state.participants } as WsEvent)
+    const existing = state.participants.filter((id) => id !== userId)
+    // A join always comes from a fresh call session on the client (a reload,
+    // or a rejoin after the connection dropped). Someone who was still on the
+    // roster is announced as gone and back, so the others drop the dead peer
+    // connection and build a new one.
+    if (alreadyIn) bus.publishToUsers(existing, { type: "call.left", conversationId, callId: state.callId, userId } as WsEvent)
+    bus.publishToUsers(existing, { type: "call.joined", conversationId, callId: state.callId, userId } as WsEvent)
+    // Everyone in the chat learns who is in its call, so those outside it can
+    // see that a call is going on and join it.
+    bus.publishToUsers(memberIds, { type: "call.participants", conversationId, callId: state.callId, participants: state.participants, muted: state.muted } as WsEvent)
     sendJson(ctx.res, 200, { call: state, iceServers: iceServersFromEnv() })
   })
   router.post("/api/conversations/:id/call/leave", async (ctx) => {
     const userId = requireAuth(ctx)
     const conversationId = ctx.params.id
     requireMember(conversationId, userId)
-    const memberIds = store.listMembers(conversationId).map((m) => m.userId)
-    const { state, removed, ended, callId } = calls.leave(conversationId, userId)
-    if (removed && callId) {
-      const others = memberIds.filter((id) => id !== userId)
-      bus.publishToUsers(others, { type: "call.left", conversationId, callId, userId } as WsEvent)
-      if (ended) {
-        bus.publishToUsers(memberIds, { type: "call.ended", conversationId, callId } as WsEvent)
-      } else if (state) {
-        bus.publishToUsers(state.participants, { type: "call.participants", conversationId, callId, participants: state.participants } as WsEvent)
-      }
-    }
+    dropFromCall(conversationId, userId, store.listMembers(conversationId).map((m) => m.userId))
     sendJson(ctx.res, 200, { ok: true })
+  })
+  // Whether a participant's microphone is on is told to the others in the
+  // call, so each of them can show it under that person's picture.
+  router.post("/api/conversations/:id/call/mute", async (ctx) => {
+    const userId = requireAuth(ctx)
+    const conversationId = ctx.params.id
+    requireMember(conversationId, userId)
+    rateLimit("call-mute:" + userId, 120, 60000)
+    const b = await readJson(ctx.req)
+    if (typeof b.muted !== "boolean") throw new HttpError(400, "muted must be true or false")
+    const state = calls.setMuted(conversationId, userId, b.muted)
+    if (!state) throw new HttpError(409, "you are not in this call")
+    const others = state.participants.filter((id) => id !== userId)
+    bus.publishToUsers(others, { type: "call.mute", conversationId, callId: state.callId, userId, muted: b.muted } as WsEvent)
+    sendJson(ctx.res, 200, { ok: true, muted: state.muted })
   })
   router.post("/api/conversations/:id/call/signal", async (ctx) => {
     const userId = requireAuth(ctx)
@@ -1683,6 +1861,10 @@ export function createApp(options: CreateAppOptions = {}): App {
     const callId = String(b.callId ?? "")
     if (!to) throw new HttpError(400, "signal target 'to' is required")
     if (!store.getMember(conversationId, to)) throw new HttpError(404, "target is not a member of this conversation")
+    // Only people in the call talk to each other: a member outside it could
+    // otherwise offer a connection to a participant and listen in unseen.
+    if (!calls.isParticipant(conversationId, userId)) throw new HttpError(409, "you are not in this call")
+    if (!calls.isParticipant(conversationId, to)) throw new HttpError(409, "target is not in this call")
     bus.publishToUsers([to], { type: "call.signal", conversationId, callId, from: userId, to, data: b.data ?? null } as WsEvent)
     sendJson(ctx.res, 202, { ok: true })
   })
@@ -2295,6 +2477,79 @@ export function createApp(options: CreateAppOptions = {}): App {
     botHub,
   )
 
+  // --- bug reports -------------------------------------------------------------
+  // Stored first, answered at once, forwarded to the developer's Telegram in
+  // the background (and retried until it gets there).
+  const bugReportTarget = options.bugReportTarget === undefined ? telegramTargetFromEnv() : options.bugReportTarget
+  const fetchImpl = options.fetch ?? fetch
+  const sendingBugReports = new Set<string>()
+  const sendBugReport = async (id: string, now: number): Promise<boolean> => {
+    if (!bugReportTarget || sendingBugReports.has(id)) return false
+    const row = store.getBugReport(id)
+    if (!row || row.deliveredAt) return false
+    sendingBugReports.add(id)
+    try {
+      const reporter = store.getUserById(row.userId)
+      let diagnostics: Diagnostics | null = null
+      try {
+        diagnostics = row.diagnostics ? (JSON.parse(row.diagnostics) as Diagnostics) : null
+      } catch {
+        diagnostics = null
+      }
+      const result = await deliverBugReport(bugReportTarget, {
+        id: row.id,
+        text: row.text,
+        diagnostics,
+        createdAt: row.createdAt,
+        reporter: { id: row.userId, username: reporter?.username ?? null, displayName: reporter?.displayName ?? null },
+        screenshots: row.screenshots,
+      }, fetchImpl)
+      store.markBugReportDelivered(id, new Date(now).toISOString(), result.screenshotError)
+      return true
+    } catch (err) {
+      const attempts = row.attempts + 1
+      const message = err instanceof Error ? err.message : String(err)
+      store.markBugReportFailed(id, message, new Date(now + retryDelayMinutes(attempts) * 60000).toISOString())
+      console.error("[api] bug report delivery failed", { id, attempts, error: message })
+      return false
+    } finally {
+      sendingBugReports.delete(id)
+    }
+  }
+  const deliverBugReports = async (now: number = Date.now()): Promise<number> => {
+    store.deleteDeliveredBugReportsBefore(new Date(now - BUG_REPORT_RETENTION_DAYS * 86400000).toISOString())
+    if (!bugReportTarget) return 0
+    let delivered = 0
+    for (const row of store.listDueBugReports(new Date(now).toISOString(), BUG_REPORT_MAX_ATTEMPTS)) {
+      if (await sendBugReport(row.id, now)) delivered += 1
+    }
+    return delivered
+  }
+  router.post("/api/bug-reports", async (ctx) => {
+    const userId = requireAuth(ctx)
+    // Five reports an hour per person (only accepted ones count, so a
+    // rejected form does not use one up); every request counts per address.
+    rateGuard("bug-report:" + userId, BUG_REPORTS_PER_HOUR, 3600000)
+    rateLimit("bug-report-ip:" + clientIp(ctx), BUG_REPORT_REQUESTS_PER_HOUR_PER_IP, 3600000)
+    const b = await readJson(ctx.req, BUG_REPORT_MAX_BODY_BYTES)
+    const text = cleanProfileText(String(b.text ?? ""))
+    if (text.length < BUG_REPORT_MIN_TEXT) throw new HttpError(400, "describe the problem")
+    if (text.length > BUG_REPORT_MAX_TEXT) throw new HttpError(400, "the description is too long")
+    let screenshots: Array<{ bytes: Buffer; type: string }>
+    try {
+      screenshots = parseScreenshots(b)
+    } catch (err) {
+      throw new HttpError(400, err instanceof Error ? err.message : "screenshot must be an image")
+    }
+    const diagnostics = sanitizeDiagnostics(b.diagnostics)
+    const id = newId("bug")
+    const createdAt = new Date().toISOString()
+    store.createBugReport({ id, userId, text, diagnostics: diagnostics ? JSON.stringify(diagnostics) : null, screenshots, createdAt })
+    rateHit("bug-report:" + userId, 3600000)
+    sendJson(ctx.res, 201, { ok: true, id })
+    void sendBugReport(id, Date.now())
+  })
+
   const listener = (req: IncomingMessage, res: ServerResponse): void => {
     const url = new URL(req.url ?? "/", "http://localhost")
     const ctx: Ctx = {
@@ -2337,5 +2592,5 @@ export function createApp(options: CreateAppOptions = {}): App {
       })
   }
 
-  return { listener, store, bus, lifecycle, refreshLastSeen, deliverDueScheduled, bots: botHub }
+  return { listener, store, bus, lifecycle, refreshLastSeen, deliverDueScheduled, deliverBugReports, bots: botHub }
 }

@@ -98,7 +98,8 @@ export type WsEvent =
   | { type: "presence.updated"; conversationId: string; userId: string; online: boolean; lastSeenAt?: string | null }
   | { type: "file.state_changed"; fileAssetId: string; replicaId: string; state: ReplicaState; tempExpiresAt?: string | null }
   | { type: "call.invite"; conversationId: string; callId: string; from: string; media: CallMedia; at: string }
-  | { type: "call.participants"; conversationId: string; callId: string; participants: string[] }
+  | { type: "call.participants"; conversationId: string; callId: string; participants: string[]; muted?: string[] }
+  | { type: "call.mute"; conversationId: string; callId: string; userId: string; muted: boolean }
   | { type: "call.joined"; conversationId: string; callId: string; userId: string }
   | { type: "call.left"; conversationId: string; callId: string; userId: string }
   | { type: "call.ended"; conversationId: string; callId: string }
@@ -112,7 +113,8 @@ export type WsEvent =
   | { type: "keys.link_resolved"; id: string; status: "approved" | "denied" }
   | { type: "keys.account_reset"; sessionId: string }
   | { type: "scheduled.updated"; conversationId: string; count: number }
-  | { type: "member.removed"; conversationId: string; userId: string }
+  // removedBy: the moderator who took the member out (absent when they left).
+  | { type: "member.removed"; conversationId: string; userId: string; removedBy?: string }
 
 export type CallMedia = "audio"
 
@@ -123,4 +125,6 @@ export interface CallState {
   startedBy: string
   startedAt: string
   participants: string[]
+  // Participants whose microphone is off.
+  muted?: string[]
 }

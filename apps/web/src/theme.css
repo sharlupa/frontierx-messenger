@@ -736,6 +736,8 @@ select.input {
 .main {
 	display: flex;
 	flex-direction: column;
+	/* Wide content scrolls or shrinks inside; it never widens the column. */
+	min-width: 0;
 	min-height: 0;
 	background: var(--bg-app);
 }
@@ -849,7 +851,9 @@ select.input {
 }
 
 .bubble-image {
-	max-width: 280px;
+	/* Never wider than the bubble: a 280px picture on a narrow phone used to
+	   push the whole chat column past the screen edge. */
+	max-width: min(280px, 100%);
 	border-radius: 12px;
 	display: block;
 	margin-top: 2px;
@@ -2596,8 +2600,8 @@ select.input {
 .read-ticks {
 	display: inline-flex;
 	align-items: center;
-	margin-left: 4px;
-	opacity: 0.6;
+	margin-left: 3px;
+	opacity: 0.75;
 }
 
 .read-ticks.read {
@@ -4063,35 +4067,6 @@ body.sidebar-resizing video {
 	font-size: 12px;
 	font-weight: 600;
 	cursor: pointer;
-}
-
-/* Several attachments staged at once */
-.composer-attachment-preview {
-	display: flex;
-	gap: 6px;
-	flex-wrap: wrap;
-	max-height: 132px;
-	overflow-y: auto;
-}
-
-.staged-item { position: relative; display: inline-flex; }
-.staged-item img { width: 56px; height: 56px; object-fit: cover; border-radius: 8px; display: block; }
-
-.staged-remove {
-	position: absolute;
-	top: -4px;
-	right: -4px;
-	width: 18px;
-	height: 18px;
-	border: none;
-	border-radius: 50%;
-	background: var(--danger);
-	color: #ffffff;
-	cursor: pointer;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	padding: 0;
 }
 
 /* Drag and drop onto the conversation */

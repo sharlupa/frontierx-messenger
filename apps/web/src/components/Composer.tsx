@@ -1,5 +1,6 @@
 import { createElement, useEffect, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react"
+import { formatBytes } from "../lib/i18n"
 import { useSettings } from "../state/settings"
 import { EmojiPanel } from "./EmojiPanel"
 import type { BotCommand, SendOptions, Sticker } from "../lib/types"
@@ -7,11 +8,18 @@ import { IconClose } from "./Icons"
 import { VoiceRecorder, formatDuration, voiceRecordingSupported, type VoiceRecording } from "../lib/voice"
 import type { ContactPayload, LocationPayload } from "../lib/richmsg"
 import { Menu, type MenuItemSpec } from "./m3"
-import { IContact, IEyeOff, IFile, IImage, ILocation, IPoll, ISchedule, ISilent, ISpoiler } from "./m3icons"
+import { IAdd, IClose, IContact, IEdit, IEyeOff, IFile, IImage, ILocation, IPlay, IPoll, ISchedule, ISilent, ISpoiler } from "./m3icons"
+import { PhotoEditor } from "./PhotoEditor"
+import { guessMime } from "../lib/media"
+import { thumbnailUrl } from "../lib/imagethumb"
+import { chunkIntoAlbums, type AlbumRef } from "../lib/album"
+import { captureVideoPoster } from "../lib/videothumb"
 import { LocationSheet } from "./LocationSheet"
 import { ContactSheet } from "./ContactSheet"
 import { ScheduleSheet } from "./ScheduleSheet"
 
+// Pause before a second try at a thumbnail that could not be made.
+const THUMB_RETRY_MS = 400
 // Recordings shorter than this are almost always a mis-tap on the mic button.
 const MIN_VOICE_SECONDS = 0.6
 const METER_BARS = 28
@@ -75,7 +83,7 @@ function IconEmoji() {
 	)
 }
 
-export type AttachOptions = SendOptions & { spoiler?: boolean }
+export type AttachOptions = SendOptions & { spoiler?: boolean; album?: AlbumRef }
 
 export function Composer({
 	disabled,
@@ -86,7 +94,7 @@ export function Composer({
 	onSubmitEdit,
 	onTyping,
 	onCancelDraft,
-	onAttach,
+	onAttachFiles,
 	onCreatePoll,
 	onSendSticker,
 	onSendGif,
@@ -106,7 +114,8 @@ export function Composer({
 	onSubmitEdit: (messageId: string, body: string) => void | Promise<void>
 	onTyping: () => void
 	onCancelDraft: () => void
-	onAttach: (file: File, caption: string, options?: AttachOptions) => void | Promise<void>
+	// Everything picked, in order; the caption rides on the first.
+	onAttachFiles: (items: Array<{ file: File; caption: string; options?: AttachOptions }>) => Promise<void>
 	onCreatePoll: (opener: HTMLButtonElement) => void
 	onSendSticker?: (sticker: Sticker) => void | Promise<void>
 	onSendGif?: (url: string) => void | Promise<void>
@@ -119,7 +128,7 @@ export function Composer({
 	// A bot's commands, offered when the message starts with "/".
 	commands?: BotCommand[]
 }) {
-	const { t } = useSettings()
+	const { t, lang } = useSettings()
 	const inputRef = useRef<HTMLTextAreaElement | null>(null)
 	const fileRef = useRef<HTMLInputElement | null>(null)
 	const mediaRef = useRef<HTMLInputElement | null>(null)
@@ -134,7 +143,10 @@ export function Composer({
 	const [selection, setSelection] = useState<{ start: number; end: number } | null>(null)
 	const pressTimer = useRef<number | null>(null)
 	const pressFired = useRef(false)
-	type Staged = { id: string; file: File; preview: string | null; spoiler: boolean }
+	// thumb: a small picture for the strip (an object URL when ownsThumb, so it
+	// is revoked with the item); null while it is being made or if there is
+	// none (files, formats the browser cannot read).
+	type Staged = { id: string; file: File; kind: "image" | "video" | "file"; thumb: string | null; ownsThumb: boolean; thumbPending: boolean; spoiler: boolean }
 	const [staged, setStaged] = useState<Staged[]>([])
 	const [caption, setCaption] = useState("")
 	const [mentionQuery, setMentionQuery] = useState<string | null>(null)
@@ -233,21 +245,94 @@ export function Composer({
 	// of the items still staged.
 	const stagedRef = useRef<Staged[]>([])
 	stagedRef.current = staged
+	const [editingId, setEditingId] = useState<string | null>(null)
+	const releaseThumb = (item: Staged) => {
+		if (item.ownsThumb && item.thumb) URL.revokeObjectURL(item.thumb)
+	}
 	useEffect(() => {
 		return () => {
-			for (const item of stagedRef.current) if (item.preview) URL.revokeObjectURL(item.preview)
+			for (const item of stagedRef.current) releaseThumb(item)
 		}
 	}, [])
 
+	// Thumbnails are made one at a time, after the tiles are already shown,
+	// so picking a dozen camera photos answers at once.
+	const thumbQueue = useRef<Promise<void>>(Promise.resolve())
+	function makeThumb(id: string, file: File, kind: Staged["kind"]) {
+		thumbQueue.current = thumbQueue.current.then(async () => {
+			if (!stagedRef.current.some((item) => item.id === id && item.file === file)) return
+			let thumb: string | null = null
+			let owns = false
+			try {
+				if (kind === "image") {
+					// A file from the phone's photo picker can fail to read for a
+					// moment right after it arrives; one more try, then the photo
+					// itself (the tile falls back to a file card if even that fails).
+					thumb = await thumbnailUrl(file)
+					if (!thumb) {
+						await new Promise((resolve) => window.setTimeout(resolve, THUMB_RETRY_MS))
+						thumb = (await thumbnailUrl(file)) ?? URL.createObjectURL(file)
+					}
+					owns = true
+				} else if (kind === "video") {
+					thumb = (await captureVideoPoster(file)).poster
+				}
+			} catch {
+				thumb = null
+			}
+			setStaged((prev) => {
+				const current = prev.find((item) => item.id === id && item.file === file)
+				if (!current) {
+					if (owns && thumb) URL.revokeObjectURL(thumb)
+					return prev
+				}
+				return prev.map((item) => (item === current ? { ...item, thumb, ownsThumb: owns, thumbPending: false } : item))
+			})
+		})
+	}
+
+	const kindOf = (file: File): Staged["kind"] => {
+		const mime = guessMime(file.name, file.type)
+		return mime.indexOf("image/") === 0 ? "image" : mime.indexOf("video/") === 0 ? "video" : "file"
+	}
+
 	function stageFiles(files: File[]) {
 		if (files.length === 0) return
-		const next = files.map((file) => ({
-			id: "staged-" + String(Date.now()) + "-" + String(Math.round(Math.random() * 1e6)),
-			file,
-			preview: file.type.indexOf("image/") === 0 ? URL.createObjectURL(file) : null,
-			spoiler: false,
-		}))
+		const next: Staged[] = files.map((file) => {
+			const kind = kindOf(file)
+			return {
+				id: "staged-" + String(Date.now()) + "-" + String(Math.round(Math.random() * 1e6)),
+				file,
+				kind,
+				thumb: null,
+				ownsThumb: false,
+				thumbPending: kind !== "file",
+				spoiler: false,
+			}
+		})
 		setStaged((prev) => prev.concat(next))
+		stagedRef.current = stagedRef.current.concat(next)
+		for (const item of next) if (item.kind !== "file") makeThumb(item.id, item.file, item.kind)
+	}
+
+	// A picture the browser cannot show (HEIC in most of them) becomes a file card.
+	function thumbFailed(id: string) {
+		setStaged((prev) => prev.map((item) => {
+			if (item.id !== id) return item
+			releaseThumb(item)
+			return { ...item, thumb: null, ownsThumb: false, thumbPending: false }
+		}))
+	}
+
+	// The editor hands back a new file for the tile; its thumbnail is redone.
+	function replaceStaged(id: string, file: File) {
+		setStaged((prev) => prev.map((item) => {
+			if (item.id !== id) return item
+			releaseThumb(item)
+			return { ...item, file, thumb: null, ownsThumb: false, thumbPending: true }
+		}))
+		stagedRef.current = stagedRef.current.map((item) => (item.id === id ? { ...item, file } : item))
+		makeThumb(id, file, "image")
 	}
 
 	// Files dropped on the conversation arrive from the parent.
@@ -266,63 +351,76 @@ export function Composer({
 	// A pasted image arrives either through the file list or as a clipboard
 	// item, and in both cases the blob usually carries no name, which the
 	// upload cannot describe. A stable name is attached before staging.
-	function namedClipboardFile(file: File): File {
+	function namedClipboardFile(file: File, index: number): File {
 		if (file.name && file.name.trim()) return file
 		const mime = file.type || "image/png"
 		const ext = mime.indexOf("image/") === 0 ? mime.slice(6).split("+")[0] : "bin"
-		return new File([file], "clipboard-" + String(Date.now()) + "." + ext, { type: mime, lastModified: Date.now() })
+		return new File([file], "clipboard-" + String(Date.now()) + (index > 0 ? "-" + String(index + 1) : "") + "." + ext, { type: mime, lastModified: Date.now() })
+	}
+
+	// Several pictures can be pasted at once (copied together in a file
+	// manager), and more can be pasted while others are already waiting: the
+	// caption field takes pastes as well.
+	function clipboardFiles(dt: DataTransfer): File[] {
+		if (dt.files && dt.files.length > 0) return Array.from(dt.files)
+		const files: File[] = []
+		for (let i = 0; i < (dt.items?.length ?? 0); i += 1) {
+			const item = dt.items[i]
+			if (!item || item.kind !== "file") continue
+			const picked = item.getAsFile()
+			if (picked) files.push(picked)
+		}
+		return files
 	}
 
 	function onPaste(e: ClipboardEvent<HTMLTextAreaElement>) {
 		if (disabled) return
 		const dt = e.clipboardData
 		if (!dt) return
-		let f: File | null = dt.files && dt.files.length > 0 ? dt.files[0] : null
-		if (!f && dt.items) {
-			for (let i = 0; i < dt.items.length; i += 1) {
-				const item = dt.items[i]
-				if (!item || item.kind !== "file") continue
-				const picked = item.getAsFile()
-				if (picked) {
-					f = picked
-					break
-				}
-			}
-		}
-		if (!f) return
+		const files = clipboardFiles(dt)
+		if (files.length === 0) return
 		e.preventDefault()
-		stageFiles([namedClipboardFile(f)])
+		stageFiles(files.map((file, index) => namedClipboardFile(file, index)))
 	}
 	function clearStaged() {
-		for (const item of staged) if (item.preview) URL.revokeObjectURL(item.preview)
+		for (const item of staged) releaseThumb(item)
 		setStaged([])
+		stagedRef.current = []
 		setCaption("")
 	}
 
 	function removeStaged(id: string) {
 		setStaged((prev) => {
 			const target = prev.find((item) => item.id === id)
-			if (target && target.preview) URL.revokeObjectURL(target.preview)
+			if (target) releaseThumb(target)
 			return prev.filter((item) => item.id !== id)
 		})
+		stagedRef.current = stagedRef.current.filter((item) => item.id !== id)
 	}
 
+	// Photos and videos go as albums of up to ALBUM_MAX_ITEMS (more make more
+	// albums), files one by one after them. The caption goes with the first.
 	async function sendStaged(options: SendOptions = {}) {
 		if (staged.length === 0 || disabled) return
-		const items = staged.map((item) => ({ file: item.file, spoiler: item.spoiler }))
+		const items = staged.map((item) => ({ file: item.file, spoiler: item.spoiler, visual: item.kind !== "file" }))
 		const cap = caption.trim()
 		clearStaged()
-		// The caption belongs to the first file, the way an album behaves.
-		for (let i = 0; i < items.length; i++) {
-			await onAttach(items[i].file, i === 0 ? cap : "", { ...options, spoiler: items[i].spoiler })
+		const sends: Array<{ file: File; options: AttachOptions }> = []
+		for (const chunk of chunkIntoAlbums(items.filter((item) => item.visual))) {
+			chunk.items.forEach((item, index) => sends.push({ file: item.file, options: { ...options, spoiler: item.spoiler, album: chunk.album ? { id: chunk.album.id, index, count: chunk.items.length } : undefined } }))
 		}
+		for (const item of items.filter((entry) => !entry.visual)) sends.push({ file: item.file, options: { ...options } })
+		await onAttachFiles(sends.map((send, index) => ({ file: send.file, caption: index === 0 ? cap : "", options: send.options })))
 	}
 
 	function toggleSpoiler(id: string) {
 		setStaged((prev) => prev.map((item) => (item.id === id ? { ...item, spoiler: !item.spoiler } : item)))
 	}
 
-	const canSpoil = (file: File) => file.type.indexOf("image/") === 0 || file.type.indexOf("video/") === 0
+	const canSpoil = (item: Staged) => item.kind !== "file"
+	// Formats the editor can open and write back.
+	const canEdit = (item: Staged) => item.kind === "image" && /^image\/(jpeg|png|webp)$/.test(guessMime(item.file.name, item.file.type))
+	const editing = editingId ? staged.find((item) => item.id === editingId) ?? null : null
 
 	const mentionMatches = mentionQuery === null
 		? []
@@ -458,14 +556,25 @@ export function Composer({
 		}
 	}
 
+	// The emoji goes where the cursor was (replacing a selection), not at the
+	// end. On touch screens the field is not focused again, which would pull
+	// the keyboard up over the panel.
 	function insertEmoji(emoji: string) {
 		if (staged.length > 0) {
 			setCaption((c) => c + emoji)
-		} else {
-			onValueChange(value + emoji)
-			onTyping()
+			return
 		}
-		inputRef.current?.focus()
+		const field = inputRef.current
+		const start = field ? field.selectionStart ?? value.length : value.length
+		const end = field ? field.selectionEnd ?? start : start
+		onValueChange(value.slice(0, start) + emoji + value.slice(end))
+		onTyping()
+		if (!field || window.matchMedia("(pointer: coarse)").matches) return
+		const caret = start + emoji.length
+		window.requestAnimationFrame(() => {
+			field.focus()
+			field.setSelectionRange(caret, caret)
+		})
 	}
 
 	const banner = draft.editingId
@@ -473,7 +582,7 @@ export function Composer({
 		: draft.replyToId
 			? { label: t("replyingTo"), body: draft.replyToText }
 			: null
-	const attachTitle = t("attachHint") + " " + MAX_ATTACHMENT_MB + " MB"
+	const attachTitle = t("attachHint") + " " + formatBytes(lang, MAX_ATTACHMENT_MB * 1024 * 1024)
 
 	return (
 		<div className="composer-wrap">
@@ -526,6 +635,7 @@ export function Composer({
 				<div className="emoji-popover">
 					<EmojiPanel
 						full
+						autoFocusSearch={!window.matchMedia("(pointer: coarse)").matches}
 						onPickEmoji={(emoji) => insertEmoji(emoji)}
 						onPickSticker={(sticker) => { setShowEmoji(false); if (onSendSticker) void onSendSticker(sticker) }}
 						onSendGif={(url) => { setShowEmoji(false); if (onSendGif) void onSendGif(url) }}
@@ -536,23 +646,47 @@ export function Composer({
 			{createElement("input", { ref: fileRef, type: "file", multiple: true, style: { display: "none" }, onChange: onPickFile })}
 			{createElement("input", { ref: mediaRef, type: "file", multiple: true, accept: "image/*,video/*", style: { display: "none" }, onChange: onPickFile })}
 			{staged.length > 0 ? (
-				<div className="composer composer-attachment">
-					<div className="composer-attachment-preview">
-						{staged.map((item) => (
-							<span key={item.id} className={"staged-item" + (item.spoiler ? " spoiler" : "")}>
-								{item.preview ? <img src={item.preview} alt={item.file.name} /> : <span className="composer-attachment-file">{item.file.name}</span>}
-								{canSpoil(item.file) ? (
-									<button type="button" className={"staged-spoiler" + (item.spoiler ? " on" : "")} onClick={() => toggleSpoiler(item.id)} title={t("spoilerToggle")} aria-label={t("spoilerToggle")} aria-pressed={item.spoiler}>
-										<IEyeOff size={14} />
+				<div className="staging" role="list" aria-label={t("attachmentsToSend")}>
+					{staged.map((item) => (
+						<div key={item.id} role="listitem" className={"staging-tile " + item.kind + (item.spoiler ? " spoiler" : "")}>
+							{item.thumb ? (
+								<img className="staging-thumb" src={item.thumb} alt={item.file.name} onError={() => thumbFailed(item.id)} />
+							) : item.thumbPending ? (
+								<span className="staging-skeleton" aria-label={t("preparingPreview")} />
+							) : (
+								<span className="staging-file">
+									{item.kind === "file" ? <IFile size={20} /> : null}
+									<span className="staging-file-name">{item.file.name}</span>
+									<span className="staging-file-size">{formatBytes(lang, item.file.size)}</span>
+								</span>
+							)}
+							{item.kind === "video" ? <span className="staging-video-mark" aria-hidden="true"><IPlay size={16} /></span> : null}
+							{item.spoiler ? <span className="staging-veil" aria-hidden="true"><span className="media-spoiler-noise" /></span> : null}
+							<button type="button" className="staging-remove" onClick={() => removeStaged(item.id)} title={t("cancel")} aria-label={t("cancel") + ": " + item.file.name}>
+								<IClose size={14} />
+							</button>
+							<span className="staging-actions">
+								{canSpoil(item) ? (
+									<button type="button" className={"staging-action" + (item.spoiler ? " on" : "")} onClick={() => toggleSpoiler(item.id)} title={t("spoilerToggle")} aria-label={t("spoilerToggle")} aria-pressed={item.spoiler}>
+										<IEyeOff size={16} />
 									</button>
 								) : null}
-								<button type="button" className="staged-remove" onClick={() => removeStaged(item.id)} title={t("cancel")} aria-label={t("cancel") + ": " + item.file.name}>
-									<IconClose size={12} />
-								</button>
+								{canEdit(item) ? (
+									<button type="button" className="staging-action" onClick={() => setEditingId(item.id)} title={t("photoEdit")} aria-label={t("photoEdit") + ": " + item.file.name}>
+										<IEdit size={16} />
+									</button>
+								) : null}
 							</span>
-						))}
-					</div>
-					<textarea className="input composer-input" rows={1} placeholder={t("addCaption")} value={caption} disabled={disabled} onChange={(e) => setCaption(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendStaged() } else if (e.key === "Escape") { e.preventDefault(); clearStaged() } }} />
+						</div>
+					))}
+					<button type="button" className="staging-add" onClick={() => (staged.every((item) => item.kind === "file") ? fileRef : mediaRef).current?.click()} disabled={disabled} title={t("attachMore")} aria-label={t("attachMore")}>
+						<IAdd size={24} />
+					</button>
+				</div>
+			) : null}
+			{staged.length > 0 ? (
+				<div className="composer composer-attachment">
+					<textarea className="input composer-input" rows={1} placeholder={t("addCaption")} value={caption} disabled={disabled} onChange={(e) => setCaption(e.target.value)} onPaste={onPaste} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void sendStaged() } else if (e.key === "Escape") { e.preventDefault(); clearStaged() } }} />
 					<button type="button" className="composer-icon-btn" onClick={clearStaged} title={t("cancel")} aria-label={t("cancel")}><IconClose /></button>
 					<button
 						ref={sendRef}
@@ -657,6 +791,13 @@ export function Composer({
 						if (kind === "text") void submit({ sendAt, silent })
 						else void sendStaged({ sendAt, silent })
 					}}
+				/>
+			) : null}
+			{editing ? (
+				<PhotoEditor
+					file={editing.file}
+					onCancel={() => setEditingId(null)}
+					onDone={(file) => { setEditingId(null); replaceStaged(editing.id, file) }}
 				/>
 			) : null}
 			{sheet === "location" && onSendLocation ? <LocationSheet onClose={() => setSheet(null)} onSend={(location) => void onSendLocation(location)} /> : null}

@@ -84,6 +84,12 @@ export function ensureAudioContext(): AudioContext | null {
   return audio
 }
 
+// Call sounds have to be heard over the call itself and from a phone lying
+// on the table, so they are louder than the message beep.
+const RING_VOLUME = 0.5
+const CALL_NOTE_VOLUME = 0.4
+const RINGBACK_VOLUME = 0.35
+
 function playRing(audio: AudioContext): void {
   const base = audio.currentTime
   for (const offset of [0, 0.4]) {
@@ -91,7 +97,7 @@ function playRing(audio: AudioContext): void {
     const gain = audio.createGain()
     gain.connect(audio.destination)
     gain.gain.setValueAtTime(0.0001, start)
-    gain.gain.exponentialRampToValueAtTime(0.26, start + 0.04)
+    gain.gain.exponentialRampToValueAtTime(RING_VOLUME, start + 0.04)
     gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.32)
     const osc = audio.createOscillator()
     osc.type = "sine"
@@ -103,21 +109,95 @@ function playRing(audio: AudioContext): void {
   }
 }
 
+// Someone came into the call you are in (two short notes going up) or left
+// it (the same notes going down). They belong to the call, like the ringtone,
+// so the message sound switch does not silence them.
+const CALL_NOTES = [587.33, 880]
+const CALL_NOTE_SECONDS = 0.14
+
+function playNotes(audio: AudioContext, notes: number[]): void {
+  const base = audio.currentTime
+  notes.forEach((frequency, index) => {
+    const start = base + index * CALL_NOTE_SECONDS
+    const gain = audio.createGain()
+    gain.connect(audio.destination)
+    gain.gain.setValueAtTime(0.0001, start)
+    gain.gain.exponentialRampToValueAtTime(CALL_NOTE_VOLUME, start + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + CALL_NOTE_SECONDS + 0.08)
+    const osc = audio.createOscillator()
+    osc.type = "sine"
+    osc.frequency.setValueAtTime(frequency, start)
+    osc.connect(gain)
+    osc.start(start)
+    osc.stop(start + CALL_NOTE_SECONDS + 0.1)
+  })
+}
+
+function withAudio(play: (audio: AudioContext) => void): void {
+  const audio = getCtx()
+  if (!audio) return
+  try {
+    if (audio.state === "suspended") {
+      void audio.resume().then(() => play(audio)).catch(() => undefined)
+    } else {
+      play(audio)
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function playCallJoinSound(): void {
+  withAudio((audio) => playNotes(audio, CALL_NOTES))
+}
+
+export function playCallLeaveSound(): void {
+  withAudio((audio) => playNotes(audio, CALL_NOTES.slice().reverse()))
+}
+
+// Calling out, until someone answers: a long low tone every few seconds, as
+// on a phone line (425 Hz, the usual ringback tone).
+const RINGBACK_HZ = 425
+const RINGBACK_TONE_SECONDS = 1
+const RINGBACK_EVERY_MS = 4000
+
+function playRingback(audio: AudioContext): void {
+  const start = audio.currentTime
+  const gain = audio.createGain()
+  gain.connect(audio.destination)
+  gain.gain.setValueAtTime(0.0001, start)
+  gain.gain.exponentialRampToValueAtTime(RINGBACK_VOLUME, start + 0.05)
+  gain.gain.setValueAtTime(RINGBACK_VOLUME, start + RINGBACK_TONE_SECONDS - 0.08)
+  gain.gain.exponentialRampToValueAtTime(0.0001, start + RINGBACK_TONE_SECONDS)
+  const osc = audio.createOscillator()
+  osc.type = "sine"
+  osc.frequency.setValueAtTime(RINGBACK_HZ, start)
+  osc.connect(gain)
+  osc.start(start)
+  osc.stop(start + RINGBACK_TONE_SECONDS + 0.02)
+}
+
+let ringbackTimer: ReturnType<typeof setInterval> | null = null
+
+export function startRingback(): void {
+  stopRingback()
+  withAudio(playRingback)
+  ringbackTimer = setInterval(() => withAudio(playRingback), RINGBACK_EVERY_MS)
+}
+
+export function stopRingback(): void {
+  if (ringbackTimer) {
+    clearInterval(ringbackTimer)
+    ringbackTimer = null
+  }
+}
+
 let ringTimer: ReturnType<typeof setInterval> | null = null
 
 export function startRingtone(): void {
-  const audio = getCtx()
-  if (!audio) return
   stopRingtone()
-  const ring = () => {
-    if (audio.state === "suspended") {
-      void audio.resume().then(() => playRing(audio)).catch(() => undefined)
-    } else {
-      playRing(audio)
-    }
-  }
-  ring()
-  ringTimer = setInterval(ring, 2600)
+  withAudio(playRing)
+  ringTimer = setInterval(() => withAudio(playRing), 2600)
 }
 
 export function stopRingtone(): void {

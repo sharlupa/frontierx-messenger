@@ -40,6 +40,8 @@ BotCommand,
 	PrivacyPolicy,
 	PrivacyScope,
 	PrivacyMode,
+	ProfileChat,
+	UserProfile,
 } from "./types"
 import { getToken } from "./session"
 
@@ -113,8 +115,17 @@ export const api = {
 	me() {
 		return request<{ user: User }>("/api/me", "GET")
 	},
-	updateProfile(input: { displayName: string }) {
+	updateProfile(input: { displayName?: string; bio?: string | null; personalChannelId?: string | null }) {
 		return request<{ user: User }>("/api/me/profile", "POST", input)
+	},
+	listManagedChannels() {
+		return request<{ channels: ProfileChat[] }>("/api/me/channels", "GET")
+	},
+	getUserProfile(userId: string) {
+		return request<UserProfile>("/api/users/" + encodeURIComponent(userId) + "/profile", "GET")
+	},
+	joinPersonalChannel(userId: string) {
+		return request<{ conversation: Conversation }>("/api/users/" + encodeURIComponent(userId) + "/channel/join", "POST", {})
 	},
 	listSessions() {
 		return request<{ sessions: SessionDevice[]; currentSessionId: string }>("/api/me/sessions", "GET")
@@ -380,6 +391,18 @@ export const api = {
 			{ role },
 		)
 	},
+	// A bug report for the developer; screenshots are image data URLs.
+	sendBugReport(input: { text: string; screenshots?: string[]; diagnostics?: unknown }) {
+		return request<{ ok: true; id: string }>("/api/bug-reports", "POST", input)
+	},
+	// Takes someone out of a group or channel (owners and admins).
+	removeMember(conversationId: string, memberId: string) {
+		return request<{ ok: true }>(
+			"/api/conversations/" + conversationId + "/members/" + memberId + "/remove",
+			"POST",
+			{},
+		)
+	},
 	putConversationKeys(conversationId: string, entries: WrappedKeyEntry[], rotate?: boolean) {
 		return request<{ ok: true; count: number }>(
 			"/api/conversations/" + conversationId + "/keys",
@@ -418,6 +441,9 @@ export const api = {
 			{},
 		)
 	},
+	setCallMuted(conversationId: string, muted: boolean) {
+		return request<{ ok: true; muted: string[] }>("/api/conversations/" + conversationId + "/call/mute", "POST", { muted })
+	},
 	leaveCall(conversationId: string, callId: string) {
 		return request<{ ok: true }>(
 			"/api/conversations/" + conversationId + "/call/leave",
@@ -426,7 +452,7 @@ export const api = {
 		)
 	},
 	setMyAvatar(avatar: string | null) { return request<{ user: User }>("/api/me/avatar", "POST", { avatar }) },
-	setConversationProfile(conversationId: string, input: { title?: string; avatar?: string | null }) { return request<{ conversation: Conversation }>("/api/conversations/" + conversationId + "/profile", "POST", input) },
+	setConversationProfile(conversationId: string, input: { title?: string; avatar?: string | null; description?: string | null }) { return request<{ conversation: Conversation }>("/api/conversations/" + conversationId + "/profile", "POST", input) },
 	listFriendRequests() { return request<{ incoming: FriendRequest[]; outgoing: FriendRequest[] }>("/api/friends/requests", "GET") },
 	sendFriendRequest(username: string) { return request<{ status: string; conversation?: Conversation; requestId?: string }>("/api/friends/requests", "POST", { username }) },
 	acceptFriendRequest(requestId: string) { return request<{ conversation: Conversation }>("/api/friends/requests/" + requestId + "/accept", "POST", {}) },
@@ -517,7 +543,7 @@ addConversationMembers(conversationId: string, usernames: string[]) { return req
 leaveConversation(conversationId: string) { return request<{ ok: true }>("/api/conversations/" + conversationId + "/leave", "POST", {}) },
 deleteConversation(conversationId: string) { return request<{ ok: true }>("/api/conversations/" + conversationId + "/delete", "POST", {}) },
 createInvite(conversationId: string, expiresInSeconds: number | null = null) { return request<{ code: string; expiresAt: string | null }>("/api/conversations/" + conversationId + "/invite", "POST", { expiresInSeconds }) },
-inviteInfo(code: string) { return request<{ code: string; kind: string; title: string | null; avatar: string | null; expiresAt: string | null }>("/api/invites/" + code, "GET") },
+inviteInfo(code: string) { return request<{ code: string; kind: string; title: string | null; avatar: string | null; description?: string | null; expiresAt: string | null }>("/api/invites/" + code, "GET") },
 joinByInvite(code: string) { return request<{ conversation: Conversation }>("/api/invites/" + code + "/join", "POST", {}) },
 	listStickers() { return request<{ stickers: Sticker[] }>("/api/me/stickers", "GET") },
 	createSticker(data: string) { return request<{ sticker: Sticker }>("/api/me/stickers", "POST", { data }) },

@@ -5,8 +5,9 @@ import { errorText } from "../lib/errorText"
 import type { Conversation, Friend } from "../lib/types"
 import { useSettings } from "../state/settings"
 import { SegToggle } from "./SegToggle"
+import { BotBadge } from "./BotBadge"
 import { Avatar, Banner, Button, Chip, ListGroup, ListItem, Sheet, TextField } from "./m3"
-import { IAdd, IBot, IClose, IPeople } from "./m3icons"
+import { IAdd, IClose, IPeople } from "./m3icons"
 
 export function NewConversationDialog({
   onClose,
@@ -87,7 +88,7 @@ export function NewConversationDialog({
               <ListItem
                 key={f.id}
                 leading={<Avatar src={f.avatar} label={f.displayName || f.username} seed={f.id} size={36} />}
-                title={<>{f.displayName || f.username}{(f as { isBot?: boolean }).isBot ? <span className="bot-badge"><IBot size={11} /> BOT</span> : null}</>}
+                title={<>{f.displayName || f.username}{(f as { isBot?: boolean }).isBot ? <BotBadge /> : null}</>}
                 subtitle={"@" + f.username}
                 onClick={() => addUser(f)}
                 trailing={<IAdd size={18} />}

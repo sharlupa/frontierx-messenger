@@ -353,7 +353,7 @@ export function ListItem(props: {
 	tone?: Tone
 	leading?: ReactNode
 	trailing?: ReactNode
-	onClick?: () => void
+	onClick?: (event: ReactMouseEvent<HTMLButtonElement>) => void
 	href?: string
 	chevron?: boolean
 	danger?: boolean
@@ -424,7 +424,7 @@ export function Switch(props: { checked: boolean; onChange: (next: boolean) => v
 	)
 }
 
-export function SwitchItem(props: { title: ReactNode; subtitle?: ReactNode; icon?: ReactNode; shape?: ShapeName; tone?: Tone; checked: boolean; onChange: (next: boolean) => void; disabled?: boolean }) {
+export function SwitchItem(props: { title: ReactNode; subtitle?: ReactNode; icon?: ReactNode; shape?: ShapeName; tone?: Tone; checked: boolean; onChange: (next: boolean) => void; disabled?: boolean; multiline?: boolean }) {
 	return (
 		<ListItem
 			title={props.title}
@@ -433,6 +433,7 @@ export function SwitchItem(props: { title: ReactNode; subtitle?: ReactNode; icon
 			shape={props.shape}
 			tone={props.tone}
 			disabled={props.disabled}
+			multiline={props.multiline}
 			onClick={props.disabled ? undefined : () => props.onChange(!props.checked)}
 			trailing={<Switch checked={props.checked} onChange={props.onChange} disabled={props.disabled} label={typeof props.title === "string" ? props.title : undefined} />}
 		/>

@@ -18,6 +18,15 @@ const MAX_BUFFERED_BYTES = 64 * 1024
 // Each presence change is fanned out to every chat partner, so a connection
 // can change it at most once a second; the latest wish always wins.
 const PRESENCE_MIN_INTERVAL_MS = 1000
+// A connection that went away without a goodbye (network gone, phone asleep,
+// browser killed) would otherwise stay "online" and keep its user in calls
+// forever. The server pings every PING_INTERVAL_MS - browsers answer pings on
+// their own, even in background tabs - and drops a socket that has said
+// nothing at all for IDLE_LIMIT_MS.
+const PING_INTERVAL_MS = 25_000
+const IDLE_LIMIT_MS = 70_000
+
+export type WebSocketOptions = { pingIntervalMs?: number; idleLimitMs?: number }
 
 function acceptKey(key: string): string {
   return createHash("sha1")
@@ -25,7 +34,7 @@ function acceptKey(key: string): string {
     .digest("base64")
 }
 
-export function attachWebSocket(server: Server, app: App): void {
+export function attachWebSocket(server: Server, app: App, options: WebSocketOptions = {}): void {
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, _head: Buffer) => {
     const url = new URL(req.url ?? "/", "http://localhost")
     if (url.pathname !== "/ws") {
@@ -54,7 +63,7 @@ export function attachWebSocket(server: Server, app: App): void {
     ].join("\r\n")
     socket.write(responseHeaders)
 
-    const conn = new WsConnection(socket, userId)
+    const conn = new WsConnection(socket, userId, options.pingIntervalMs ?? PING_INTERVAL_MS, options.idleLimitMs ?? IDLE_LIMIT_MS)
     const countsPresence = url.searchParams.get("presence") !== "0"
     const subscription = app.bus.subscribeUser(userId, (event) => conn.sendJson(event), { presence: countsPresence })
     conn.onClose = subscription
@@ -77,16 +86,34 @@ class WsConnection {
   private presenceWanted: boolean | null = null
   private presenceTimer: ReturnType<typeof setTimeout> | null = null
   private presenceAppliedAt = 0
+  private lastHeard = Date.now()
+  private heartbeat: ReturnType<typeof setInterval> | null = null
 
   constructor(
     private readonly socket: Duplex,
     readonly userId: string,
+    private readonly pingIntervalMs: number,
+    private readonly idleLimitMs: number,
   ) {}
 
   start(): void {
     this.socket.on("data", (chunk: Buffer) => this.onData(chunk))
+    // The HTTP server keeps half-open sockets, so a client that closed its side
+    // (tab closed, process killed) only shows up as "end"; without handling it
+    // the socket would sit in CLOSE_WAIT and the user would never leave.
+    this.socket.on("end", () => this.drop())
     this.socket.on("close", () => this.handleClose())
     this.socket.on("error", () => this.handleClose())
+    this.heartbeat = setInterval(() => {
+      if (Date.now() - this.lastHeard > this.idleLimitMs) this.drop()
+      else this.sendFrame(0x9, Buffer.alloc(0))
+    }, this.pingIntervalMs)
+    this.heartbeat.unref?.()
+  }
+
+  private drop(): void {
+    this.socket.destroy()
+    this.handleClose()
   }
 
   private handleClose(): void {
@@ -94,6 +121,8 @@ class WsConnection {
     this.closed = true
     if (this.presenceTimer) clearTimeout(this.presenceTimer)
     this.presenceTimer = null
+    if (this.heartbeat) clearInterval(this.heartbeat)
+    this.heartbeat = null
     this.onClose()
   }
 
@@ -125,6 +154,7 @@ class WsConnection {
 
   private onData(chunk: Buffer): void {
     if (this.closed) return
+    this.lastHeard = Date.now()
     if (this.buffer.length + chunk.length > MAX_BUFFERED_BYTES) {
       // 1009: message too big.
       const code = Buffer.alloc(2)

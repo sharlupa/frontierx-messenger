@@ -6,13 +6,15 @@ import { useSettings } from "../state/settings"
 import { AvatarCropper } from "./AvatarCropper"
 import { QrDialog } from "./QrDialog"
 import { errorText } from "../lib/errorText"
-import { formatDateTime, formatLastSeen, type StringKey } from "../lib/i18n"
-import { Avatar, Banner, Button, ListGroup, ListItem, Sheet, TextField } from "./m3"
-import { IAdd, IBot, IClock, ILink, ILogout, IPeople, IQr, ITrash } from "./m3icons"
+import { format, formatBytes, formatDateTime, formatLastSeen, type StringKey } from "../lib/i18n"
+import { BotBadge } from "./BotBadge"
+import { Avatar, Banner, Button, ListGroup, ListItem, Menu, Sheet, TextField } from "./m3"
+import { IAdd, IClock, ILink, ILogout, IPeople, IPerson, IPersonRemove, IQr, IShield, ITrash } from "./m3icons"
 import { ChoiceSheet } from "./settings/common"
 
 const editableRoles: MemberRole[] = ["admin", "member", "restricted"]
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024
+const DESCRIPTION_MAX = 500
 // 0 means the link never expires.
 const INVITE_TTL_OPTIONS: ReadonlyArray<{ seconds: number; label: StringKey }> = [
 	{ seconds: 3600, label: "inviteTtlHour" },
@@ -31,10 +33,12 @@ export function MemberDialog({
 	conversation,
 	onClose,
 	onRoleChange,
+	onRemoveMember,
 	onSaveProfile,
 	onLeave,
 	onDelete,
 	onMembersChanged,
+	onOpenProfile,
 }: {
 	members: ConversationMember[]
 	onlineUserIds: string[]
@@ -44,16 +48,20 @@ export function MemberDialog({
 	conversation?: Conversation
 	onClose: () => void
 	onRoleChange: (memberId: string, role: MemberRole) => Promise<void>
-	onSaveProfile?: (input: { title?: string; avatar?: string | null }) => Promise<void>
+	onRemoveMember?: (memberId: string) => Promise<void>
+	onSaveProfile?: (input: { title?: string; avatar?: string | null; description?: string | null }) => Promise<void>
 	onLeave?: () => Promise<void> | void
 	onDelete?: () => Promise<void> | void
 	onMembersChanged?: () => void
+	onOpenProfile?: (userId: string) => void
 }) {
 	const { t, lang } = useSettings()
 	const [busyId, setBusyId] = useState<string | null>(null)
 	const [error, setError] = useState<string | null>(null)
 	const [name, setName] = useState(conversation?.title ?? "")
 	const [avatar, setAvatar] = useState<string | null>(conversation?.avatar ?? null)
+	const [description, setDescription] = useState(conversation?.description ?? "")
+	const [memberMenu, setMemberMenu] = useState<{ member: ConversationMember; anchor: HTMLElement } | null>(null)
 	const [cropperSrc, setCropperSrc] = useState<string | null>(null)
 	const [savingProfile, setSavingProfile] = useState(false)
 	const [friends, setFriends] = useState<Friend[]>([])
@@ -68,6 +76,8 @@ export function MemberDialog({
 	const [confirmKind, setConfirmKind] = useState<null | "leave" | "delete">(null)
 	const [ttlOpen, setTtlOpen] = useState(false)
 	const [roleFor, setRoleFor] = useState<ConversationMember | null>(null)
+	const [removeFor, setRemoveFor] = useState<ConversationMember | null>(null)
+	const [removing, setRemoving] = useState(false)
 	const fileRef = useRef<HTMLInputElement | null>(null)
 	const isGroupLike = Boolean(conversation && conversation.kind !== "direct" && !conversation.isSelf)
 	const canEditProfile = Boolean(canManage && onSaveProfile && isGroupLike)
@@ -85,7 +95,7 @@ export function MemberDialog({
 		event.target.value = ""
 		if (!file) return
 		if (file.size > MAX_AVATAR_BYTES) {
-			setError(t("fileTooLarge") + " 2 MB")
+			setError(t("fileTooLarge") + " " + formatBytes(lang, MAX_AVATAR_BYTES))
 			return
 		}
 		const reader = new FileReader()
@@ -98,7 +108,7 @@ export function MemberDialog({
 		setSavingProfile(true)
 		setError(null)
 		try {
-			await onSaveProfile({ title: name.trim() || undefined, avatar })
+			await onSaveProfile({ title: name.trim() || undefined, avatar, description: description.trim() || null })
 		} catch (err) {
 			setError(errorText(err, t("memberSaveFailed")))
 		} finally {
@@ -183,6 +193,32 @@ export function MemberDialog({
 		}
 	}
 
+	// The server's rules: only the owner changes roles; owners remove anyone
+	// but themselves, admins remove ordinary and read-only members.
+	const myRole = members.find((member) => member.userId === currentUserId)?.role ?? null
+	const canChangeRole = (member: ConversationMember): boolean =>
+		isGroupLike && myRole === "owner" && member.role !== "owner" && member.userId !== currentUserId
+	const canRemove = (member: ConversationMember): boolean =>
+		Boolean(onRemoveMember) && isGroupLike && member.userId !== currentUserId && member.role !== "owner" &&
+		(myRole === "owner" || (myRole === "admin" && (member.role === "member" || member.role === "restricted")))
+	const removeLabel = conversation?.kind === "channel" ? t("removeFromChannel") : t("removeFromGroup")
+	const memberName = (member: ConversationMember): string => member.displayName || member.username
+
+	async function confirmRemove() {
+		if (!removeFor || !onRemoveMember || removing) return
+		setRemoving(true)
+		setError(null)
+		try {
+			await onRemoveMember(removeFor.userId)
+			setRemoveFor(null)
+		} catch (err) {
+			setError(errorText(err, t("removeMemberFailed")))
+			setRemoveFor(null)
+		} finally {
+			setRemoving(false)
+		}
+	}
+
 	const roleLabel = (role: MemberRole): string => t(("role_" + role) as StringKey)
 	const ttlLabel = t(INVITE_TTL_OPTIONS.find((option) => option.seconds === inviteTtl)?.label ?? "inviteTtlNever")
 
@@ -209,6 +245,7 @@ export function MemberDialog({
 							<input ref={fileRef} type="file" accept="image/*" hidden onChange={onPickAvatar} />
 						</div>
 						<TextField label={t("groupName")} value={name} maxLength={80} onChange={setName} />
+						<TextField label={t("descriptionLabel")} value={description} maxLength={DESCRIPTION_MAX} multiline onChange={setDescription} supporting={<span className="field-counter"><span>{t("descriptionHint")}</span><span>{description.length}/{DESCRIPTION_MAX}</span></span>} />
 						<div className="m3-row settings-form-actions">
 							<Button variant="filled" busy={savingProfile} onClick={() => void saveProfile()}>{t("saveChanges")}</Button>
 						</div>
@@ -245,7 +282,7 @@ export function MemberDialog({
 			) : null}
 			<ListGroup label={t("members")}>
 				{members.map((member) => {
-					const editable = canManage && member.role !== "owner" && member.userId !== currentUserId
+					const editable = canManage && (canChangeRole(member) || canRemove(member))
 					const online = onlineUserIds.includes(member.userId)
 					const presence = online ? t("online") : lastSeen?.[member.userId] ? formatLastSeen(lang, lastSeen[member.userId]) : ""
 					return (
@@ -257,9 +294,9 @@ export function MemberDialog({
 									{online ? <span className="presence-dot online" aria-hidden="true" /> : null}
 								</span>
 							}
-							title={<>{member.displayName || member.username}{member.isBot ? <span className="bot-badge"><IBot size={11} /> BOT</span> : null}</>}
+							title={<>{member.displayName || member.username}{member.isBot ? <BotBadge /> : null}</>}
 							subtitle={"@" + member.username + (presence ? " · " + presence : "")}
-							onClick={editable ? () => setRoleFor(member) : undefined}
+							onClick={editable ? (event) => setMemberMenu({ member, anchor: event.currentTarget }) : onOpenProfile ? () => onOpenProfile(member.userId) : undefined}
 							trailing={<span className={"role-chip role-" + member.role + (busyId === member.userId ? " busy" : "")}>{roleLabel(member.role)}</span>}
 						/>
 					)
@@ -273,6 +310,18 @@ export function MemberDialog({
 						<ListItem title={t("leaveConversationAction")} icon={<ILogout />} shape="circle" danger disabled={leaving} onClick={() => void doLeave()} />
 					) : null}
 				</ListGroup>
+			) : null}
+			{memberMenu ? (
+				<Menu
+					anchor={memberMenu.anchor}
+					align="end"
+					items={[
+						...(onOpenProfile ? [{ key: "profile", label: t("openProfile"), icon: <IPerson size={20} />, onSelect: () => onOpenProfile(memberMenu.member.userId) }] : []),
+						...(canChangeRole(memberMenu.member) ? [{ key: "role", label: t("changeRole"), icon: <IShield size={20} />, onSelect: () => setRoleFor(memberMenu.member) }] : []),
+						...(canRemove(memberMenu.member) ? [{ key: "remove", label: removeLabel, icon: <IPersonRemove size={20} />, danger: true, onSelect: () => setRemoveFor(memberMenu.member) }] : []),
+					]}
+					onClose={() => setMemberMenu(null)}
+				/>
 			) : null}
 			{qrLink ? <QrDialog value={qrLink} title={conversation?.title || t("qrInviteTitle")} onClose={() => setQrLink(null)} /> : null}
 			{ttlOpen ? (
@@ -309,6 +358,18 @@ export function MemberDialog({
 					}
 				>
 					<p className="settings-intro">{confirmKind === "delete" ? t("deleteConfirmCopy") : t("leaveConfirmCopy")}</p>
+				</Sheet>
+			) : null}
+			{removeFor ? (
+				<Sheet title={format(t("removeMemberTitle"), { name: memberName(removeFor) })} icon={<IPersonRemove />} iconTone="error" iconShape="burst" onClose={() => { if (!removing) setRemoveFor(null) }} size="sm"
+					actions={
+						<>
+							<Button variant="text" disabled={removing} onClick={() => setRemoveFor(null)}>{t("cancel")}</Button>
+							<Button variant="danger" busy={removing} onClick={() => void confirmRemove()}>{removeLabel}</Button>
+						</>
+					}
+				>
+					<p className="settings-intro">{format(t("removeMemberCopy"), { name: memberName(removeFor) })}</p>
 				</Sheet>
 			) : null}
 			{cropperSrc ? <AvatarCropper src={cropperSrc} onCancel={() => setCropperSrc(null)} onConfirm={(dataUrl) => { setCropperSrc(null); setAvatar(dataUrl) }} /> : null}

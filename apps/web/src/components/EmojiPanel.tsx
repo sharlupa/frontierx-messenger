@@ -1,12 +1,14 @@
-import { useEffect, useRef, useState } from "react"
-import type { ChangeEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from "react"
 import { EMOJI_DATA, type EmojiGroupKey } from "../lib/emojiData"
+import { searchEmoji } from "../lib/emojiSearch"
 import { api } from "../lib/api"
 import { gifToVideo } from "../lib/gif"
 import { AvatarCropper } from "./AvatarCropper"
 import type { Sticker } from "../lib/types"
 import { useSettings } from "../state/settings"
 import type { StringKey } from "../lib/i18n"
+import { IClose, ISearch } from "./m3icons"
 
 const EMOJI_FREQ_KEY = "fx.emoji.freq"
 const EMOJI_FREQ_LIMIT = 24
@@ -80,6 +82,25 @@ const GROUP_NAMES: Record<EmojiGroupKey, StringKey> = {
 }
 
 type Tab = "emoji" | "stickers" | "gifs"
+const TABS: ReadonlyArray<{ id: Tab; label: StringKey }> = [
+	{ id: "emoji", label: "emojiTab" },
+	{ id: "stickers", label: "stickersTab" },
+	{ id: "gifs", label: "gifsTab" },
+]
+const FREQUENT_GROUP = "freq"
+
+// Names and keywords for search (lib/emojiNames.ts, generated from Unicode
+// CLDR) are only fetched once someone starts searching.
+let namesPromise: Promise<Record<string, string>> | null = null
+function loadEmojiNames(): Promise<Record<string, string>> {
+	if (!namesPromise) {
+		namesPromise = import("../lib/emojiNames").then((module) => module.EMOJI_NAMES).catch((err: unknown) => {
+			namesPromise = null
+			throw err
+		})
+	}
+	return namesPromise
+}
 
 export function EmojiPanel({
 	onPickEmoji,
@@ -87,19 +108,30 @@ export function EmojiPanel({
 	onSendGif,
 	onClose,
 	full = true,
+	autoFocusSearch = false,
 }: {
 	onPickEmoji: (emoji: string) => void
 	onPickSticker?: (sticker: Sticker) => void
 	onSendGif?: (url: string) => void
 	onClose: () => void
 	full?: boolean
+	// Put the cursor in the search field at once (not on phones, where that
+	// would pull up the keyboard over the panel).
+	autoFocusSearch?: boolean
 }) {
 	const { t } = useSettings()
 	const [tab, setTab] = useState<Tab>("emoji")
 	const gridRef = useRef<HTMLDivElement | null>(null)
+	const searchRef = useRef<HTMLInputElement | null>(null)
 
 	const [emojiFreq, setEmojiFreq] = useState<EmojiFreq>(() => readEmojiFreq())
-	const frequent = topEmoji(emojiFreq)
+	// The frequent row is read once when the panel opens, so it does not
+	// reshuffle under the pointer while picking several emoji in a row.
+	const [frequent] = useState(() => topEmoji(emojiFreq))
+	const [activeGroup, setActiveGroup] = useState<string>(frequent.length > 0 ? FREQUENT_GROUP : EMOJI_DATA[0].key)
+	const [query, setQuery] = useState("")
+	const [names, setNames] = useState<Record<string, string> | null>(null)
+	const [namesFailed, setNamesFailed] = useState(false)
 
 	function pickEmoji(emoji: string): void {
 		setEmojiFreq(noteEmojiUsed(emoji))
@@ -125,6 +157,20 @@ export function EmojiPanel({
 			active = false
 		}
 	}, [tab, full])
+
+	useEffect(() => {
+		if (autoFocusSearch && tab === "emoji") searchRef.current?.focus({ preventScroll: true })
+	}, [autoFocusSearch, tab])
+
+	const wantNames = useCallback(() => {
+		if (names) return
+		loadEmojiNames().then(setNames, () => setNamesFailed(true))
+	}, [names])
+	useEffect(() => {
+		if (query.trim()) wantNames()
+	}, [query, wantNames])
+	const results = useMemo(() => (names && query.trim() ? searchEmoji(query, names) : []), [names, query])
+	const searching = query.trim().length > 0
 
 	function pickStickerFile(event: ChangeEvent<HTMLInputElement>) {
 		const file = event.target.files && event.target.files[0] ? event.target.files[0] : null
@@ -163,51 +209,114 @@ export function EmojiPanel({
 		}
 	}
 
-	const scrollToGroup = (id: string) => {
+	const groupTop = (id: string): number | null => {
 		const grid = gridRef.current
 		const target = grid?.querySelector<HTMLElement>("[data-group='" + id + "']")
-		if (grid && target) grid.scrollTo({ top: target.offsetTop - grid.offsetTop - 4, behavior: "smooth" })
+		return grid && target ? target.offsetTop - grid.offsetTop : null
+	}
+	const scrollToGroup = (id: string) => {
+		const top = groupTop(id)
+		if (top === null) return
+		setActiveGroup(id)
+		gridRef.current?.scrollTo({ top, behavior: "smooth" })
+	}
+	// The category whose title has scrolled to the top is the current one.
+	const scrollFrame = useRef(0)
+	const onGridScroll = () => {
+		if (searching || scrollFrame.current) return
+		scrollFrame.current = window.requestAnimationFrame(() => {
+			scrollFrame.current = 0
+			const grid = gridRef.current
+			if (!grid) return
+			const ids = (frequent.length > 0 ? [FREQUENT_GROUP] : []).concat(EMOJI_DATA.map((group) => group.key))
+			let current = ids[0]
+			for (const id of ids) {
+				const top = groupTop(id)
+				if (top !== null && top - grid.scrollTop <= 12) current = id
+			}
+			setActiveGroup(current)
+		})
+	}
+	useEffect(() => () => window.cancelAnimationFrame(scrollFrame.current), [])
+
+	function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+		if (event.key !== "Escape") return
+		event.stopPropagation()
+		if (searching) setQuery("")
+		else onClose()
 	}
 
+	const cell = (emoji: string, key: string) => (
+		<button type="button" key={key} className="emoji-cell" onClick={() => pickEmoji(emoji)} title={names?.[emoji]?.split("|")[0]}>{emoji}</button>
+	)
+
 	return (
-		<div className={"emoji-panel" + (full ? "" : " compact")} role="dialog" aria-label={t("emojiTab")}>
+		<div className={"emoji-panel" + (full ? "" : " compact")} role="dialog" aria-label={t("emojiTab")} onKeyDown={onKeyDown}>
 			{full ? (
-				<div className="emoji-tabs" role="tablist">
-					<button type="button" role="tab" aria-selected={tab === "emoji"} className={"emoji-tab" + (tab === "emoji" ? " active" : "")} onClick={() => setTab("emoji")}>{t("emojiTab")}</button>
-					<button type="button" role="tab" aria-selected={tab === "stickers"} className={"emoji-tab" + (tab === "stickers" ? " active" : "")} onClick={() => setTab("stickers")}>{t("stickersTab")}</button>
-					<button type="button" role="tab" aria-selected={tab === "gifs"} className={"emoji-tab" + (tab === "gifs" ? " active" : "")} onClick={() => setTab("gifs")}>{t("gifsTab")}</button>
+				<div className="emoji-head">
+					<div className="emoji-tabs" role="tablist">
+						{TABS.map((item) => (
+							<button key={item.id} type="button" role="tab" aria-selected={tab === item.id} className={"emoji-tab" + (tab === item.id ? " active" : "")} onClick={() => setTab(item.id)}>{t(item.label)}</button>
+						))}
+					</div>
+					<button type="button" className="emoji-close" onClick={onClose} aria-label={t("close")} title={t("close")}>
+						<IClose size={18} />
+					</button>
 				</div>
 			) : null}
 			{error ? <div className="emoji-error">{error}</div> : null}
 			{!full || tab === "emoji" ? (
 				<>
-					<div className="emoji-nav" role="toolbar" aria-label={t("emojiTab")}>
-						{frequent.length > 0 ? <button type="button" className="emoji-nav-btn" onClick={() => scrollToGroup("freq")} title={t("frequentEmoji")} aria-label={t("frequentEmoji")}>🕘</button> : null}
-						{EMOJI_DATA.map((group) => (
-							<button type="button" key={group.key} className="emoji-nav-btn" onClick={() => scrollToGroup(group.key)} title={t(GROUP_NAMES[group.key])} aria-label={t(GROUP_NAMES[group.key])}>{group.icon}</button>
-						))}
-					</div>
-					<div className="emoji-tab-body emoji-grid" ref={gridRef}>
-						{frequent.length > 0 ? (
-							<div className="emoji-group" data-group="freq">
-								<div className="emoji-group-title">{t("frequentEmoji")}</div>
-								<div className="emoji-group-items">
-									{frequent.map((emoji, fi) => (
-										<button type="button" key={"freq" + emoji + fi} className="emoji-cell" onClick={() => pickEmoji(emoji)}>{emoji}</button>
-									))}
-								</div>
-							</div>
+					<label className="emoji-search">
+						<ISearch size={18} />
+						<input
+							ref={searchRef}
+							type="search"
+							value={query}
+							placeholder={t("searchEmoji")}
+							aria-label={t("searchEmoji")}
+							onFocus={wantNames}
+							onChange={(event) => setQuery(event.target.value)}
+						/>
+						{searching ? (
+							<button type="button" className="emoji-search-clear" onClick={() => { setQuery(""); searchRef.current?.focus() }} aria-label={t("close")}>
+								<IClose size={16} />
+							</button>
 						) : null}
-						{EMOJI_DATA.map((group) => (
-							<div className="emoji-group" key={group.key} data-group={group.key}>
-								<div className="emoji-group-title">{t(GROUP_NAMES[group.key])}</div>
-								<div className="emoji-group-items">
-									{group.emoji.map((emoji) => (
-										<button type="button" key={emoji} className="emoji-cell" onClick={() => pickEmoji(emoji)}>{emoji}</button>
-									))}
-								</div>
-							</div>
-						))}
+					</label>
+					{searching ? null : (
+						<div className="emoji-nav" role="toolbar" aria-label={t("emojiTab")}>
+							{frequent.length > 0 ? (
+								<button type="button" className={"emoji-nav-btn" + (activeGroup === FREQUENT_GROUP ? " active" : "")} aria-pressed={activeGroup === FREQUENT_GROUP} onClick={() => scrollToGroup(FREQUENT_GROUP)} title={t("frequentEmoji")} aria-label={t("frequentEmoji")}>🕘</button>
+							) : null}
+							{EMOJI_DATA.map((group) => (
+								<button type="button" key={group.key} className={"emoji-nav-btn" + (activeGroup === group.key ? " active" : "")} aria-pressed={activeGroup === group.key} onClick={() => scrollToGroup(group.key)} title={t(GROUP_NAMES[group.key])} aria-label={t(GROUP_NAMES[group.key])}>{group.icon}</button>
+							))}
+						</div>
+					)}
+					<div className="emoji-tab-body emoji-grid" ref={gridRef} onScroll={onGridScroll}>
+						{searching ? (
+							results.length > 0 ? (
+								<div className="emoji-group-items">{results.map((emoji) => cell(emoji, "q" + emoji))}</div>
+							) : names || namesFailed ? (
+								<div className="emoji-empty">{t("emojiNoResults")}</div>
+							) : null
+						) : (
+							<>
+								{frequent.length > 0 ? (
+									<div className="emoji-group" data-group={FREQUENT_GROUP}>
+										<div className="emoji-group-title">{t("frequentEmoji")}</div>
+										<div className="emoji-group-items">{frequent.map((emoji) => cell(emoji, "freq" + emoji))}</div>
+									</div>
+								) : null}
+								{EMOJI_DATA.map((group) => (
+									<div className="emoji-group" key={group.key} data-group={group.key}>
+										<div className="emoji-group-title">{t(GROUP_NAMES[group.key])}</div>
+										<div className="emoji-group-items">{group.emoji.map((emoji) => cell(emoji, emoji))}</div>
+									</div>
+								))}
+							</>
+						)}
 					</div>
 				</>
 			) : null}
@@ -242,9 +351,6 @@ export function EmojiPanel({
 			{stickerDraft ? (
 				<AvatarCropper src={stickerDraft} shape="rounded" outputSize={320} title={t("cropSticker")} onCancel={() => setStickerDraft(null)} onConfirm={saveSticker} />
 			) : null}
-			<button type="button" className="emoji-close" onClick={onClose} aria-label={t("close")} title={t("close")}>
-				<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
-			</button>
 		</div>
 	)
 }

@@ -97,6 +97,9 @@ export async function shrinkPreviewImage(blob: Blob, maxEdge = 400, quality = 0.
 		canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
 		const context = canvas.getContext("2d")
 		if (!context) return null
+		// JPEG has no transparency: see-through parts would turn black.
+		context.fillStyle = "#ffffff"
+		context.fillRect(0, 0, canvas.width, canvas.height)
 		context.drawImage(image, 0, 0, canvas.width, canvas.height)
 		return canvas.toDataURL("image/jpeg", quality)
 	} catch {

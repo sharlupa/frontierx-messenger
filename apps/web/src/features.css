@@ -179,28 +179,6 @@
 .composer-attachment {
 	align-items: center;
 }
-.composer-attachment-preview {
-	flex: 0 0 auto;
-}
-.composer-attachment-preview img {
-	width: 46px;
-	height: 46px;
-	border-radius: 8px;
-	object-fit: cover;
-	display: block;
-}
-.composer-attachment-file {
-	max-width: 180px;
-	padding: 8px 12px;
-	border-radius: 8px;
-	background: var(--bg-elevated);
-	color: var(--text);
-	font-size: 13px;
-	font-weight: 600;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
 .composer-icon-btn svg {
 	width: 20px;
 	height: 20px;
@@ -209,152 +187,6 @@
 	color: var(--accent);
 	background: var(--accent-soft);
 }
-.emoji-popover .emoji-panel {
-	position: absolute;
-	left: 12px;
-	right: auto;
-	bottom: 72px;
-	z-index: 40;
-}
-
-/* Emoji / sticker / GIF panel */
-.emoji-panel {
-	width: 340px;
-	max-width: calc(100vw - 24px);
-	background: var(--bg-panel);
-	border: 1px solid var(--border);
-	border-radius: 12px;
-	box-shadow: var(--shadow);
-	display: flex;
-	flex-direction: column;
-	overflow: hidden;
-}
-.msg-picker .emoji-panel {
-	width: 100%;
-	border: none;
-	box-shadow: none;
-	border-radius: 0;
-}
-.emoji-tabs {
-	display: flex;
-	gap: 2px;
-	padding: 8px 8px 0;
-}
-.emoji-tab {
-	flex: 1;
-	border: none;
-	background: transparent;
-	color: var(--text-muted);
-	font-size: 13px;
-	font-weight: 600;
-	padding: 7px 6px;
-	border-radius: 8px 8px 0 0;
-	cursor: pointer;
-}
-.emoji-tab:hover {
-	background: var(--bg-hover);
-	color: var(--text);
-}
-.emoji-tab.active {
-	background: var(--bg-elevated);
-	color: var(--accent);
-}
-.emoji-tab-body {
-	padding: 8px;
-	max-height: 262px;
-	overflow-y: auto;
-}
-.emoji-grid {
-	display: flex;
-	flex-direction: column;
-	gap: 10px;
-}
-.emoji-group-icon {
-	font-size: 11px;
-	font-weight: 700;
-	color: var(--text-faint);
-	text-transform: uppercase;
-	letter-spacing: 0.04em;
-	margin-bottom: 4px;
-}
-.emoji-group-items {
-	display: grid;
-	grid-template-columns: repeat(8, 1fr);
-	gap: 2px;
-}
-.emoji-cell {
-	border: none;
-	background: transparent;
-	border-radius: 7px;
-	padding: 4px 0;
-	font-size: 20px;
-	line-height: 1.2;
-	cursor: pointer;
-}
-.emoji-cell:hover {
-	background: var(--bg-hover);
-}
-.emoji-empty,
-.emoji-error {
-	padding: 14px 8px;
-	color: var(--text-muted);
-	font-size: 13px;
-	text-align: center;
-}
-.emoji-error {
-	color: var(--danger);
-}
-.sticker-actions {
-	margin-bottom: 8px;
-}
-.sticker-grid {
-	display: grid;
-	grid-template-columns: repeat(4, 1fr);
-	gap: 6px;
-}
-.sticker-cell {
-	border: 1px solid var(--border);
-	background: var(--bg-elevated);
-	border-radius: 10px;
-	padding: 4px;
-	cursor: pointer;
-	aspect-ratio: 1 / 1;
-}
-.sticker-cell img {
-	width: 100%;
-	height: 100%;
-	object-fit: contain;
-	display: block;
-}
-.gif-search-row {
-	display: flex;
-	gap: 6px;
-	margin-bottom: 8px;
-}
-.gif-grid {
-	display: grid;
-	grid-template-columns: repeat(2, 1fr);
-	gap: 6px;
-}
-.gif-cell {
-	border: none;
-	background: var(--bg-elevated);
-	border-radius: 10px;
-	padding: 0;
-	overflow: hidden;
-	cursor: pointer;
-}
-.gif-cell img {
-	width: 100%;
-	display: block;
-}
-.emoji-panel-foot {
-	display: flex;
-	justify-content: flex-end;
-	padding: 8px;
-	border-top: 1px solid var(--border);
-}
-
 /* Header ... more-menu (feature 16) */
 .menu-overlay {
 	position: fixed;
@@ -1001,8 +833,6 @@
 }
 
 /* GIF uploader + inline video */
-.gif-upload { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 22px 12px; text-align: center; }
-.gif-upload-hint { font-size: 12px; color: var(--text-muted); max-width: 240px; line-height: 1.4; }
 video.bubble-image { display: block; max-width: 100%; border-radius: 12px; }
 
 /* Uniform rounded-square stickers */

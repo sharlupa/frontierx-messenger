@@ -21,6 +21,11 @@
 	--m3-shape-l: 20px;
 	--m3-shape-xl: 28px;
 	--m3-shape-full: 999px;
+	/* Pill for elements that morph to a smaller radius when hovered or pressed.
+	   From 999px the springy curves overshoot below zero on the way down, so
+	   the element flashes square before settling; this stays a pill for
+	   anything up to 56px tall and morphs smoothly. */
+	--m3-shape-pill: 28px;
 
 	/* Tonal roles derived from the theme accent. */
 	--m3-primary-container: color-mix(in srgb, var(--accent) 26%, var(--bg-panel));
@@ -235,7 +240,7 @@
 /* --- Buttons: pill at rest, squarer while pressed ---------------------------- */
 
 .button {
-	border-radius: var(--m3-shape-full);
+	border-radius: var(--m3-shape-pill);
 	transition:
 		border-radius var(--m3-dur-fast) var(--m3-spring-fast),
 		transform var(--m3-dur-fast) var(--m3-spring-fast),
@@ -422,14 +427,6 @@
 	transition: height 160ms var(--m3-spring-fast);
 	border-radius: 999px;
 }
-.staged-item {
-	animation: m3-pop-in var(--m3-dur-fast) var(--m3-spring-fast) both;
-}
-.emoji-panel {
-	transform-origin: bottom left;
-	animation: m3-menu-in var(--m3-dur) var(--m3-spring) both;
-	border-radius: var(--m3-shape-l);
-}
 
 /* --- Chat list ---------------------------------------------------------------- */
 
@@ -500,7 +497,7 @@
 		scale var(--m3-dur-fast) var(--m3-spring-fast);
 }
 .folder-tab.active {
-	border-radius: var(--m3-shape-full);
+	border-radius: var(--m3-shape-pill);
 	background: var(--m3-primary-container);
 	color: var(--m3-on-primary-container);
 	border-color: transparent;
@@ -534,7 +531,7 @@
 	animation: m3-fade-in 300ms var(--m3-effects) both;
 }
 .reaction {
-	border-radius: var(--m3-shape-full);
+	border-radius: var(--m3-shape-pill);
 	animation: m3-pop-in var(--m3-dur) var(--m3-spring-bouncy) both;
 	transition: transform var(--m3-dur-fast) var(--m3-spring-fast),
 		scale var(--m3-dur-fast) var(--m3-spring-fast), background-color 200ms var(--m3-effects), border-radius var(--m3-dur-fast) var(--m3-spring-fast);
@@ -783,7 +780,7 @@
 .sidebar-tool,
 .logout {
 	border-color: transparent;
-	border-radius: var(--m3-shape-full);
+	border-radius: var(--m3-shape-pill);
 	background: var(--m3-secondary-container);
 	color: var(--m3-on-secondary-container);
 	font-weight: 600;

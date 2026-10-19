@@ -217,7 +217,7 @@ body.m3-sheet-open {
 	min-height: 40px;
 	padding: 0 22px;
 	border: 1px solid transparent;
-	border-radius: var(--m3-shape-full);
+	border-radius: var(--m3-shape-pill);
 	font: inherit;
 	font-size: 14.5px;
 	font-weight: 700;

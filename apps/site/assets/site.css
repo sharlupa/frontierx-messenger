@@ -40,6 +40,10 @@
 	--r-l: 24px;
 	--r-xl: 32px;
 	--r-xxl: 44px;
+	/* Pill for things that morph to a smaller radius on hover or press. From
+	   999px the springy curves overshoot below zero on the way down and the
+	   button flashes square before settling; 30px is a pill up to 60px tall. */
+	--r-pill: 30px;
 	--font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 	--mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo, Consolas, monospace;
 }
@@ -170,7 +174,7 @@ code {
 	min-height: 48px;
 	padding: 0 24px;
 	border: 1px solid transparent;
-	border-radius: 999px;
+	border-radius: var(--r-pill);
 	font: 600 16px/1 var(--font);
 	text-decoration: none;
 	white-space: nowrap;
@@ -269,7 +273,7 @@ code {
 }
 .nav-links a {
 	padding: 10px 18px;
-	border-radius: 999px;
+	border-radius: var(--r-pill);
 	color: var(--text-soft);
 	font-weight: 600;
 	font-size: 15px;
@@ -343,7 +347,7 @@ code {
 	width: 48px;
 	height: 48px;
 	border: 0;
-	border-radius: 999px;
+	border-radius: var(--r-pill);
 	background: var(--surface-2);
 	color: var(--text-strong);
 	cursor: pointer;
@@ -1055,7 +1059,7 @@ a.tile:hover .tile-more svg {
 	transition: border-radius 0.4s var(--spring);
 }
 .chip.on {
-	border-radius: 999px;
+	border-radius: var(--r-pill);
 	background: var(--primary);
 	color: var(--on-primary);
 }
@@ -1606,7 +1610,7 @@ a.tile:hover .tile-more svg {
 .copy {
 	border: 0;
 	padding: 8px 14px;
-	border-radius: 999px;
+	border-radius: var(--r-pill);
 	background: var(--secondary-container);
 	color: var(--on-secondary-container);
 	font: 700 13px/1 var(--font);
@@ -1951,7 +1955,7 @@ a.tile:hover .tile-more svg {
 	min-height: 52px;
 	padding: 0 28px;
 	border: 0;
-	border-radius: 999px;
+	border-radius: var(--r-pill);
 	background: #e5484d;
 	color: #fff;
 	font: 700 16px var(--font);

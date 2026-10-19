@@ -1,30 +1,40 @@
 import { useState } from "react"
-import { isNativeApp, nativeCheckUpdates, nativePlatform } from "../../lib/native"
-import { isStandalone } from "../../lib/webpush"
+import { isNativeApp, nativeCheckUpdates } from "../../lib/native"
+import { APP_BUILD, APP_VERSION } from "../../lib/buildInfo"
+import { platformKind, type PlatformKind } from "../../lib/platform"
+import type { StringKey } from "../../lib/i18n"
 import { useSettings } from "../../state/settings"
 import { BrandLogo } from "../BrandLogo"
 import { Banner, ListGroup, ListItem } from "../m3"
 import { IApple, ICode, IDesktop, IInfo, IPhone, IShield, IUpdate } from "../m3icons"
 
-const APP_VERSION = "0.3.0"
+// Systems go by their own names; the two web cases are described in words.
+const PLATFORM_NAMES: Record<PlatformKind, string | { key: StringKey }> = {
+	android: "Android",
+	ios: "iOS",
+	macos: "macOS",
+	windows: "Windows",
+	linux: "Linux",
+	webapp: { key: "platformWebApp" },
+	browser: { key: "platformBrowser" },
+}
 
-function platformLabel(): string {
-	const native = nativePlatform()
-	if (native === "android") return "Android"
-	if (native === "ios") return "iOS"
-	if (native === "desktop") return /Mac/i.test(navigator.userAgent) ? "macOS" : /Windows/i.test(navigator.userAgent) ? "Windows" : "Linux"
-	return isStandalone() ? "Web app" : "Browser"
+export function usePlatformLabel(): string {
+	const { t } = useSettings()
+	const name = PLATFORM_NAMES[platformKind()]
+	return typeof name === "string" ? name : t(name.key)
 }
 
 export function AboutPage() {
 	const { t } = useSettings()
+	const platform = usePlatformLabel()
 	const [notice, setNotice] = useState<string | null>(null)
 	return (
 		<div className="m3-stack">
 			<section className="settings-about-hero">
 				<BrandLogo size={72} />
 				<h3>FrontierX</h3>
-				<p>{t("aboutVersion")} {APP_VERSION} · {platformLabel()}</p>
+				<p title={APP_BUILD || undefined}>{t("aboutVersion")} {APP_VERSION} · {platform}</p>
 			</section>
 			{notice ? <Banner tone="info" icon={<IInfo />}>{notice}</Banner> : null}
 			<ListGroup label={t("updatesSection")}>
