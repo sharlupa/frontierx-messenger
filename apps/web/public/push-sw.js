@@ -56,3 +56,66 @@ self.addEventListener("notificationclick", (event) => {
 		}),
 	)
 })
+
+/* The app's page comes from the network whenever there is one, so each start
+ * runs the latest build (no Ctrl+F5 after an update); the precached copy is
+ * only for when the server cannot be reached, so chats saved on the device
+ * can still be read. Workbox would otherwise answer from its copy first and
+ * the new build would show only on the start after next.
+ *
+ * The Android app opens "/", which the server answers with the app for its
+ * WebView; in a browser "/" is the landing page and is left alone, like the
+ * other pages of the site (keep in step with navigateFallbackDenylist in
+ * vite.config.ts).
+ */
+const APP_NETWORK_WAIT_MS = 5000
+const SITE_PAGES = [/^[/]home/, /^[/]download/, /^[/]features/, /^[/]privacy/, /^[/]delete-account/, /^[/]changes/, /^[/]changelog/, /^[/]site[/]/, /^[/]releases[/]/, /^[/]sdk[/]/]
+
+function isAndroidAppWebView() {
+	const ua = (self.navigator && self.navigator.userAgent) || ""
+	return ua.indexOf("; wv)") >= 0 || ua.toLowerCase().indexOf("frontierx-app") >= 0
+}
+
+function isAppPage(url) {
+	if (url.pathname === "/") return isAndroidAppWebView() || url.searchParams.get("app") === "1"
+	return !SITE_PAGES.some((pattern) => pattern.test(url.pathname))
+}
+
+function keptAppPage() {
+	return caches.match("/index.html", { ignoreSearch: true })
+}
+
+async function appPageNetworkFirst(request) {
+	const network = fetch(request)
+	let timer = null
+	const slow = new Promise((resolve) => {
+		timer = setTimeout(() => resolve(null), APP_NETWORK_WAIT_MS)
+	})
+	try {
+		const first = await Promise.race([network, slow])
+		// A proxy error page means the server is down: the kept copy is better.
+		if (first && first.status < 500) return first
+		const kept = await keptAppPage()
+		if (kept) {
+			network.catch(() => undefined)
+			return kept
+		}
+		return first || (await network)
+	} catch (error) {
+		const kept = await keptAppPage()
+		if (kept) return kept
+		throw error
+	} finally {
+		if (timer) clearTimeout(timer)
+	}
+}
+
+self.addEventListener("fetch", (event) => {
+	const request = event.request
+	if (request.method !== "GET" || request.mode !== "navigate") return
+	const url = new URL(request.url)
+	if (url.origin !== self.location.origin || !isAppPage(url)) return
+	// Answered here; the precache route registered after this must not try too.
+	event.stopImmediatePropagation()
+	event.respondWith(appPageNetworkFirst(request))
+})

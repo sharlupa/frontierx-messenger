@@ -1,5 +1,6 @@
 import type { WsEvent } from "./types"
 import { watchActivity } from "./activity"
+import { NATIVE_PRESENCE_EVENT } from "./appUpdate"
 
 export type RealtimeHandle = {
 	close: () => void
@@ -74,7 +75,11 @@ export function connectRealtime(token: string, onEvent: (event: WsEvent) => void
 		}
 	}
 
-	const setNative = (visible: boolean) => activity.setNativeInFront(visible)
+	const setNative = (visible: boolean) => {
+		activity.setNativeInFront(visible)
+		// lib/appUpdate.ts restarts into a new build while the app is away.
+		window.dispatchEvent(new CustomEvent(NATIVE_PRESENCE_EVENT, { detail: { visible } }))
+	}
 	if (!options.quiet) (window as unknown as { fxSetPresence?: (v: boolean) => void }).fxSetPresence = setNative
 
 	open()

@@ -33,6 +33,7 @@ export const IKey = (p: Props) => <Svg {...p}><circle cx="8" cy="15" r="4.5" /><
 export const IShield = (p: Props) => <Svg {...p}><path d="M12 3 4.5 6v5.5c0 4.6 3.1 8.3 7.5 9.5 4.4-1.2 7.5-4.9 7.5-9.5V6z" /><path d="m9 12 2.2 2.2L15.5 10" /></Svg>
 export const IPalette = (p: Props) => <Svg {...p}><path d="M12 3a9 9 0 1 0 0 18c1.4 0 2-1 2-2 0-1.3-1-1.5-1-2.7 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3z" /><circle cx="7.5" cy="11.5" r="1.2" /><circle cx="10" cy="7.5" r="1.2" /><circle cx="14.5" cy="7.5" r="1.2" /></Svg>
 export const IBell = (p: Props) => <Svg {...p}><path d="M18 16v-5a6 6 0 1 0-12 0v5l-2 2h16z" /><path d="M10 20a2 2 0 0 0 4 0" /></Svg>
+export const ICloudOff = (p: Props) => <Svg {...p}><path d="M7.2 8.2A5 5 0 0 0 6.5 18H17" /><path d="M10 5.6A6 6 0 0 1 17.6 10a4 4 0 0 1 2.9 6.2" /><path d="M3 3l18 18" /></Svg>
 export const IBellOff = (p: Props) => <Svg {...p}><path d="M18 16v-5a6 6 0 0 0-9.6-4.8" /><path d="M6 11v5l-2 2h13" /><path d="M10 20a2 2 0 0 0 4 0" /><path d="M3 3l18 18" /></Svg>
 export const IDevices = (p: Props) => <Svg {...p}><rect x="3" y="5" width="13" height="10" rx="2" /><path d="M6 19h7" /><rect x="17" y="9" width="4.5" height="10" rx="1.4" /></Svg>
 export const IPhone = (p: Props) => <Svg {...p}><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" /><path d="M11 18.5h2" /></Svg>

@@ -20,6 +20,7 @@ import { ContactBubble, LocationBubble } from "./RichBubbles"
 import { IArrowDown, IBellOff, IChat, ICopy, IDownload, IEdit, IEyeOff, IForward, ILink, IPin, IPinOff, IPlay, IReply, ISmilePlus, ITrash } from "./m3icons"
 import { IconButton, Menu, type MenuItemSpec } from "./m3"
 import { useContextMenuGesture } from "../lib/longpress"
+import { isOffline, onOfflineChange } from "../lib/offline"
 import type { BotButton } from "../lib/botmsg"
 
 // How long the thread holds on to its end after a send, while the message
@@ -275,12 +276,26 @@ function VoiceBlock(props: { media: MediaEnvelope; onResolveMedia: (media: Media
 // Video and non-voice audio are fetched only when the viewer asks for them:
 // the blob is encrypted end to end, so playing means downloading and decrypting
 // the whole file, and doing that for every clip in a chat would be wasteful.
+// Why a file did not open: no network and no copy on this device, or
+// anything else. The first clears once the server answers again.
+type MediaFailure = "offline" | "error" | null
+
+function useClearWhenOnline(failure: MediaFailure, clear: () => void): void {
+	useEffect(() => {
+		if (failure !== "offline") return
+		return onOfflineChange((offline) => {
+			if (!offline) clear()
+		})
+	}, [failure])
+}
+
 function VideoBlock(props: { media: MediaEnvelope; onResolveMedia: (media: MediaEnvelope, onProgress?: (ratio: number) => void) => Promise<string | null>; onExpand?: () => void }) {
 	const { t } = useSettings()
 	const [url, setUrl] = useState<string | null>(null)
 	const [loading, setLoading] = useState(false)
 	const [progress, setProgress] = useState(0)
-	const [failed, setFailed] = useState(false)
+	const [failed, setFailed] = useState<MediaFailure>(null)
+	useClearWhenOnline(failed, () => setFailed(null))
 	const [unsupported, setUnsupported] = useState(false)
 	const width = props.media.width && props.media.width > 0 ? props.media.width : null
 	const height = props.media.height && props.media.height > 0 ? props.media.height : null
@@ -293,15 +308,15 @@ function VideoBlock(props: { media: MediaEnvelope; onResolveMedia: (media: Media
 		try {
 			const resolved = await props.onResolveMedia(props.media, (value) => setProgress(value))
 			if (resolved) setUrl(resolved)
-			else setFailed(true)
+			else setFailed("error")
 		} catch {
-			setFailed(true)
+			setFailed(isOffline() ? "offline" : "error")
 		} finally {
 			setLoading(false)
 		}
 	}
 
-	if (failed) return <div className="media-status">{t("videoUnavailable")}</div>
+	if (failed) return <div className="media-status">{failed === "offline" ? t("mediaNotSaved") : t("videoUnavailable")}</div>
 
 	if (url) {
 		return (
@@ -553,7 +568,12 @@ function MediaBlock(props: { media: MediaEnvelope; onResolveMedia: (media: Media
 function MediaBlockInner(props: { media: MediaEnvelope; onResolveMedia: (media: MediaEnvelope, onProgress?: (ratio: number) => void) => Promise<string | null>; onOpenViewer?: () => void }) {
 	const { t } = useSettings()
 	const [url, setUrl] = useState<string | null>(null)
-	const [failed, setFailed] = useState(false)
+	const [failed, setFailed] = useState<MediaFailure>(null)
+	const [attempt, setAttempt] = useState(0)
+	useClearWhenOnline(failed, () => {
+		setFailed(null)
+		setAttempt((value) => value + 1)
+	})
 	const isVoice = props.media.kind === "voice"
 	const isImage = props.media.kind === "image"
 	const isVideo = isVideoMedia(props.media)
@@ -569,14 +589,15 @@ function MediaBlockInner(props: { media: MediaEnvelope; onResolveMedia: (media: 
 				const resolved = await props.onResolveMedia(props.media)
 				if (active) setUrl(resolved)
 			} catch {
-				if (active) setFailed(true)
+				if (active) setFailed(isOffline() ? "offline" : "error")
 			}
 		}
 		void run()
 		return () => {
 			active = false
 		}
-	}, [props.media.fileId, isImage, isLoopingClip])
+	}, [props.media.fileId, isImage, isLoopingClip, attempt])
+	const unavailable = failed === "offline" ? t("mediaNotSaved") : t("imageUnavailable")
 
 	if (isVoice) {
 		return <VoiceBlock media={props.media} onResolveMedia={props.onResolveMedia} />
@@ -585,7 +606,7 @@ function MediaBlockInner(props: { media: MediaEnvelope; onResolveMedia: (media: 
 		return (
 			<div className="media-image-wrap">
 				{failed ? (
-					<div className="media-status">{t("imageUnavailable")}</div>
+					<div className="media-status">{unavailable}</div>
 				) : url ? (
 					<video src={url} className="bubble-image" autoPlay loop muted playsInline />
 				) : (
@@ -603,8 +624,14 @@ function MediaBlockInner(props: { media: MediaEnvelope; onResolveMedia: (media: 
 	if (isImage) {
 		return (
 			<div className="media-image-wrap">
-				{failed ? (
-					<div className="media-status">{t("imageUnavailable")}</div>
+				{failed === "offline" && props.media.width && props.media.height ? (
+					// Not on this device: the blurred preview keeps the photo's place.
+					<div className="media-placeholder" style={mediaBox(props.media)}>
+						{safePreview(props.media.poster) ? <img className="media-placeholder-img" src={safePreview(props.media.poster) ?? undefined} alt="" /> : null}
+						<span className="media-offline-note">{unavailable}</span>
+					</div>
+				) : failed ? (
+					<div className="media-status">{unavailable}</div>
 				) : url ? (
 					<img
 						src={url}

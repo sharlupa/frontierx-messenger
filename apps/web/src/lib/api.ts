@@ -43,7 +43,8 @@ BotCommand,
 	ProfileChat,
 	UserProfile,
 } from "./types"
-import { getToken } from "./session"
+import { getActiveAccountId, getToken } from "./session"
+import * as offline from "./offline"
 
 let BASE = ((import.meta as { env?: Record<string, string | undefined> }).env?.VITE_API_BASE as string | undefined) ?? ""
 
@@ -66,12 +67,143 @@ export class ApiError extends Error {
 // screen for that account instead of leaving every screen failing.
 export const UNAUTHORIZED_EVENT = "frontierx:unauthorized"
 
+// Answers kept on the device for reading without a network (lib/offline.ts):
+// the chat list and folders, keys, and the members, reactions, pins, polls
+// and read state of each chat. Messages have their own store.
+const OFFLINE_READS: RegExp[] = [
+	/^\/api\/me$/,
+	/^\/api\/conversations$/,
+	/^\/api\/me\/folders$/,
+	/^\/api\/keys\/state$/,
+	/^\/api\/keys\/vault(\?.*)?$/,
+	/^\/api\/conversations\/[^/?]+\/(keys|members|reactions|pinned|polls|receipts)$/,
+]
+
+// With a copy in hand, a server that does not answer within this long is
+// treated as unreachable (a network without internet hangs instead of failing).
+const OFFLINE_WAIT_MS = 8000
+
+// Proxy answers when the server itself is down.
+function unreachableStatus(status: number): boolean {
+	return status === 502 || status === 503 || status === 504
+}
+
+class UnreachableError extends ApiError {
+	constructor() {
+		super(0, "Request failed")
+		this.name = "UnreachableError"
+	}
+}
+
+// The network request, with failures to reach the server told apart from
+// the server's own answers.
+async function send(path: string, init: RequestInit): Promise<Response> {
+	let res: Response
+	try {
+		res = await fetch(BASE + path, init)
+	} catch (error) {
+		offline.noteNetworkFailure()
+		throw error
+	}
+	if (unreachableStatus(res.status)) offline.noteNetworkFailure()
+	else offline.noteNetworkSuccess()
+	return res
+}
+
+// Reads go to the server first; when it cannot be reached the copy from the
+// last answer is used. A later answer still refreshes the copy.
+async function readWithFallback<T>(load: () => Promise<T>, fallback: () => Promise<T | undefined>, remember: (data: T) => Promise<void>): Promise<T> {
+	const live = load().then((data) => {
+		void remember(data).catch(() => undefined)
+		return data
+	})
+	const fromCopy = async (error: unknown): Promise<T> => {
+		const copy = await fallback().catch(() => undefined)
+		if (copy === undefined) throw error
+		return copy
+	}
+	if (offline.deviceOffline()) {
+		const copy = await fallback().catch(() => undefined)
+		if (copy === undefined) return live
+		live.catch(() => undefined)
+		return copy
+	}
+	let timer: ReturnType<typeof setTimeout> | null = null
+	const slow = new Promise<"slow">((resolve) => {
+		timer = setTimeout(() => resolve("slow"), OFFLINE_WAIT_MS)
+	})
+	try {
+		const first = await Promise.race([live, slow])
+		if (first !== "slow") return first
+		const copy = await fallback().catch(() => undefined)
+		if (copy === undefined) return await live
+		offline.noteNetworkFailure()
+		live.catch(() => undefined)
+		return copy
+	} catch (error) {
+		if (!isUnreachable(error)) throw error
+		return fromCopy(error)
+	} finally {
+		if (timer) clearTimeout(timer)
+	}
+}
+
+function isUnreachable(error: unknown): boolean {
+	if (error instanceof UnreachableError) return true
+	if (error instanceof ApiError) return unreachableStatus(error.status)
+	// fetch rejects with a TypeError when the request never got an answer
+	return error instanceof TypeError
+}
+
 async function request<T>(path: string, method: string, body?: unknown, tokenOverride?: string | null): Promise<T> {
+	const account = tokenOverride === undefined ? getActiveAccountId() : null
+	if (method === "GET" && account && OFFLINE_READS.some((pattern) => pattern.test(path))) {
+		return readWithFallback(
+			() => requestNow<T>(path, method, body, tokenOverride),
+			() => offline.loadResponse<T>(account, path),
+			(data) => offline.saveResponse(account, path, data),
+		)
+	}
+	return requestNow<T>(path, method, body, tokenOverride)
+}
+
+type MessagePageQuery = { limit: number; before?: string | null; around?: string | null; after?: string | null }
+type MessagePageResult = { messages: MessageEnvelope[]; hasMore: boolean; hasNewer: boolean }
+
+// A page of a chat: from the server, kept in the chat's store on the device;
+// from that store when the server cannot be reached.
+function readMessagePage(conversationId: string, query: MessagePageQuery): Promise<MessagePageResult> {
+	const params = new URLSearchParams()
+	if (query.around) params.set("around", query.around)
+	else if (query.after) params.set("after", query.after)
+	else if (query.before) params.set("before", query.before)
+	params.set("limit", String(query.limit))
+	const path = "/api/conversations/" + conversationId + "/messages?" + params.toString()
+	const account = getActiveAccountId()
+	const load = () => requestNow<MessagePageResult>(path, "GET")
+	if (!account) return load()
+	return readWithFallback(
+		load,
+		async () => {
+			const stored = await offline.loadMessages(account, conversationId)
+			return offline.pageFromStore(stored, query) ?? undefined
+		},
+		async (page) => {
+			const cursorId = query.before ?? query.after ?? null
+			let cursor: MessageEnvelope | null = null
+			if (cursorId) cursor = (await offline.loadMessages(account, conversationId)).find((message) => message.id === cursorId) ?? null
+			const range = offline.rangeOfPage({ messages: page.messages, hasMore: page.hasMore, hasNewer: Boolean(page.hasNewer) }, query, cursor)
+			if (range) await offline.storeMessages(account, conversationId, page.messages, range)
+		},
+	)
+}
+
+async function requestNow<T>(path: string, method: string, body?: unknown, tokenOverride?: string | null): Promise<T> {
 	const headers: Record<string, string> = {}
 	const token = tokenOverride === undefined ? getToken() : tokenOverride
 	if (token) headers["authorization"] = "Bearer " + token
 	if (body !== undefined) headers["content-type"] = "application/json"
-	const res = await fetch(BASE + path, {
+	const res = await send(path, {
 		method,
 		headers,
 		body: body === undefined ? undefined : JSON.stringify(body),
@@ -180,15 +312,8 @@ export const api = {
 	saveConversationDraft(conversationId: string, ciphertext: string | null) {
 		return request<{ draft: ConversationDraft | null }>("/api/conversations/" + conversationId + "/draft", "POST", { ciphertext })
 	},
-	listMessages(conversationId: string, opts: { limit?: number; before?: string | null } = {}) {
-		const params = new URLSearchParams()
-		if (opts.limit) params.set("limit", String(opts.limit))
-		if (opts.before) params.set("before", opts.before)
-		const query = params.toString()
-		return request<{ messages: MessageEnvelope[]; hasMore: boolean; hasNewer?: boolean }>(
-			"/api/conversations/" + conversationId + "/messages" + (query ? "?" + query : ""),
-			"GET",
-		)
+	listMessages(conversationId: string, opts: { limit?: number; before?: string | null } = {}): Promise<{ messages: MessageEnvelope[]; hasMore: boolean; hasNewer?: boolean }> {
+		return readMessagePage(conversationId, { limit: opts.limit ?? 50, before: opts.before ?? null })
 	},
 	sendMessage(conversationId: string, input: { ciphertext: string; replyTo?: string | null; silent?: boolean }) {
 		return request<{ message: MessageEnvelope }>(
@@ -275,6 +400,7 @@ export const api = {
 	// attachment uploads. A Blob body streams from disk instead of the heap.
 	uploadFileBlob(fileId: string, body: Uint8Array | Blob, onProgress?: (ratio: number) => void): Promise<{ ok: boolean; bytes: number }> {
 		const token = getToken()
+		const account = getActiveAccountId()
 		const payload = body instanceof Blob ? body : new Blob([body as BlobPart])
 		return new Promise((resolve, reject) => {
 			const xhr = new XMLHttpRequest()
@@ -294,6 +420,8 @@ export const api = {
 					data = {}
 				}
 				if (xhr.status >= 200 && xhr.status < 300) {
+					// What this device sent is there to open without a network too.
+					if (account) void offline.saveBlob(account, fileId, payload)
 					resolve({ ok: Boolean(data.ok), bytes: Number(data.bytes ?? 0) })
 					return
 				}
@@ -308,11 +436,26 @@ export const api = {
 	// onProgress reports 0..1 while the ciphertext streams in, so a video bubble
 	// can show how far along it is. It is only called when the server sends a
 	// content length; otherwise the download simply completes.
+	// A file's ciphertext never changes, so a copy on the device is used first
+	// (lib/offline.ts) and every download is kept there.
 	async downloadFileBlob(fileId: string, onProgress?: (ratio: number) => void): Promise<Uint8Array> {
+		const account = getActiveAccountId()
+		if (account) {
+			const kept = await offline.loadBlob(account, fileId)
+			if (kept) {
+				onProgress?.(1)
+				return kept
+			}
+		}
+		const bytes = await api.fetchFileBlob(fileId, onProgress)
+		if (account) void offline.saveBlob(account, fileId, bytes)
+		return bytes
+	},
+	async fetchFileBlob(fileId: string, onProgress?: (ratio: number) => void): Promise<Uint8Array> {
 		const token = getToken()
 		const headers: Record<string, string> = {}
 		if (token) headers.authorization = "Bearer " + token
-		const res = await fetch(BASE + "/api/files/" + fileId + "/blob", { method: "GET", headers })
+		const res = await send("/api/files/" + fileId + "/blob", { method: "GET", headers })
 		if (!res.ok) {
 			const detail = await res.text()
 			throw new ApiError(res.status, detail || "Download failed")
@@ -505,10 +648,10 @@ removeFriend(userId: string) { return request<{ ok: true }>("/api/friends/" + us
 		return request<{ messages: MessageEnvelope[]; nextBefore: string | null }>("/api/search/messages?" + params.toString(), "GET")
 	},
 	messagesAround(conversationId: string, messageId: string, limit = 60) {
-		return request<{ messages: MessageEnvelope[]; hasMore: boolean; hasNewer: boolean }>("/api/conversations/" + conversationId + "/messages?around=" + encodeURIComponent(messageId) + "&limit=" + limit, "GET")
+		return readMessagePage(conversationId, { limit, around: messageId })
 	},
 	messagesAfter(conversationId: string, messageId: string, limit = 50) {
-		return request<{ messages: MessageEnvelope[]; hasMore: boolean; hasNewer: boolean }>("/api/conversations/" + conversationId + "/messages?after=" + encodeURIComponent(messageId) + "&limit=" + limit, "GET")
+		return readMessagePage(conversationId, { limit, after: messageId })
 	},
 	// --- bots ---
 	listBots() { return request<{ bots: BotInfo[] }>("/api/bots", "GET") },
@@ -565,7 +708,6 @@ joinByInvite(code: string) { return request<{ conversation: Conversation }>("/ap
 	resetPassword(input: { email: string; code: string; password: string }) { return request<{ ok: true }>("/api/auth/password/reset", "POST", input) },
 	registerPush(endpoint: string, deviceId: string) { return request<{ ok: true }>("/api/me/push/register", "POST", { endpoint, deviceId }) },
 	unregisterPush(endpoint: string, deviceId: string) { return request<{ ok: true }>("/api/me/push/unregister", "POST", { endpoint, deviceId }) },
-	sendTestPush() { return request<{ delivered: number; endpoints: number }>("/api/me/push/test", "POST", {}) },
 	latestRelease(platform: string, version: string) { return request<{ latest: ReleaseInfo | null; updateAvailable: boolean }>("/api/updates/latest?platform=" + encodeURIComponent(platform) + "&version=" + encodeURIComponent(version), "GET") },
 }
 

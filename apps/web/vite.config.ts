@@ -16,6 +16,8 @@ export default defineConfig({
 		react(),
 		VitePWA({
 			registerType: "autoUpdate",
+			// Registered by lib/appUpdate.ts, which also checks for new builds.
+			injectRegister: false,
 			manifest: {
 				name: "FrontierX",
 				short_name: "FrontierX",

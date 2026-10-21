@@ -295,7 +295,9 @@ export function WavyCircle(props: { value?: number | null; size?: number; label?
 
 // A large, slow morph for backgrounds and empty states, like the ones on the
 // FrontierX site. It pauses while off screen and stays still for reduced motion.
-export function MorphBlob(props: { size?: number; className?: string; shapes?: number[]; morphMs?: number; holdMs?: number }) {
+// delayMs keeps it still for a moment: inside a sheet that is sliding in, a
+// shape redrawn every frame would make the slide repaint with it.
+export function MorphBlob(props: { size?: number; className?: string; shapes?: number[]; morphMs?: number; holdMs?: number; delayMs?: number }) {
 	const size = props.size ?? 240
 	const order = props.shapes ?? [1, 0, 2, 5, 4]
 	const morphMs = props.morphMs ?? 1100
@@ -304,6 +306,12 @@ export function MorphBlob(props: { size?: number; className?: string; shapes?: n
 	const wrapRef = useRef<HTMLSpanElement>(null)
 	const pathRef = useRef<SVGPathElement>(null)
 	const [visible, setVisible] = useState(true)
+	const [started, setStarted] = useState(!props.delayMs)
+	useEffect(() => {
+		if (started) return
+		const timer = window.setTimeout(() => setStarted(true), props.delayMs)
+		return () => window.clearTimeout(timer)
+	}, [])
 	useEffect(() => {
 		const node = wrapRef.current
 		if (!node || typeof IntersectionObserver === "undefined") return
@@ -311,7 +319,7 @@ export function MorphBlob(props: { size?: number; className?: string; shapes?: n
 		observer.observe(node)
 		return () => observer.disconnect()
 	}, [])
-	useFrames(!reduced && visible, (elapsed) => {
+	useFrames(!reduced && visible && started, (elapsed) => {
 		const cycle = morphMs + holdMs
 		const step = Math.floor(elapsed / cycle)
 		const k = springEase(Math.min(1, (elapsed % cycle) / morphMs))

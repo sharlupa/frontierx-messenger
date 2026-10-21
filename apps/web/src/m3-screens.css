@@ -873,6 +873,17 @@
 	object-fit: cover;
 	filter: blur(14px) saturate(1.15);
 }
+/* Offline, with no copy on the device: a quiet note on the blurred preview. */
+.media-offline-note {
+	position: relative;
+	padding: 6px 12px;
+	border-radius: var(--m3-shape-pill);
+	background: color-mix(in srgb, var(--m3-surface-container-highest) 82%, transparent);
+	color: var(--m3-on-surface);
+	font-size: 12px;
+	font-weight: 500;
+	line-height: 16px;
+}
 .media-spoiler {
 	position: absolute;
 	inset: 0;
@@ -3123,4 +3134,12 @@ html {
 }
 .album-progress .m3-wavy-circle-label {
 	font-size: 11px;
+}
+
+/* On a phone the offline banner is one line: the details would cost a fifth
+   of the screen, and the chat list already says it is waiting for network. */
+@media (max-width: 720px) {
+	.offline-banner .m3-banner-body {
+		display: none;
+	}
 }

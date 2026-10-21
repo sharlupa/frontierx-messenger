@@ -5,6 +5,7 @@ import { App } from "./App"
 import { AuthProvider } from "./state/auth"
 import { SettingsProvider } from "./state/settings"
 import { installErrorLog } from "./lib/diagnostics"
+import { startAppUpdates } from "./lib/appUpdate"
 import "./theme.css"
 import "./features.css"
 import "./mobile-fixes.css"
@@ -15,6 +16,8 @@ import "./m3-emoji.css"
 
 // Errors from here on can go with a bug report.
 installErrorLog()
+// New builds are picked up on their own (no Ctrl+F5 needed).
+startAppUpdates()
 
 const rootElement = document.getElementById("root")
 if (!rootElement) {

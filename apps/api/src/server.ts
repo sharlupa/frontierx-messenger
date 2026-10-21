@@ -143,10 +143,11 @@ function serveStatic(req: IncomingMessage, res: ServerResponse): boolean {
   const isHtml = filePath.endsWith(".html")
   const headers: Record<string, string> = { "content-type": contentTypeFor(filePath), "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "x-frame-options": "SAMEORIGIN" }
   // Vite emits content-hashed asset filenames, so they can be cached forever;
-  // index.html must always revalidate so new builds are picked up.
+  // index.html, the service worker and the other unhashed scripts must always
+  // revalidate so new builds are picked up.
   if (!isHtml && rawPath.startsWith("/assets/")) {
     headers["cache-control"] = "public, max-age=31536000, immutable"
-  } else if (isHtml) {
+  } else if (isHtml || /\.(js|mjs|webmanifest)$/.test(filePath)) {
     headers["cache-control"] = "no-cache"
   }
 

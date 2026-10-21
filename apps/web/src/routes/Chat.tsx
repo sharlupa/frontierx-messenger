@@ -7,7 +7,9 @@ import { connectRealtime } from "../lib/ws"
 import { playMessageSound, startRingtone, stopRingtone } from "../lib/sound"
 import { isSealedMessage } from "../lib/keyvault"
 import { activeKeyring, KeyUnavailableError, type Keyring } from "../lib/keyring"
-import { accountKey, adoptLegacyPreference } from "../lib/session"
+import { accountKey, adoptLegacyPreference, getActiveAccountId } from "../lib/session"
+import { forgetConversation, isOffline, onOfflineChange, saveResponse, storeOpenChat } from "../lib/offline"
+import { holdUpdates, onBeforeRestart, rememberOpenChat, takeReopenedChat } from "../lib/appUpdate"
 import type { BotCommand, Conversation, ConversationFolder, ConversationMember, DisplayMessage, LinkRequestInfo, MemberRole, MessageEnvelope, PinnedMessage, Reaction, PollSummary, SendOptions, Sticker, WsEvent } from "../lib/types"
 import { ConversationList } from "../components/ConversationList"
 import { MessageThread } from "../components/MessageThread"
@@ -88,7 +90,7 @@ import { ScheduledSheet } from "../components/ScheduledSheet"
 import { SafetySheet } from "../components/SafetySheet"
 import { BotBadge } from "../components/BotBadge"
 import { Avatar, Badge, Banner, Button, IconButton, ListGroup, ListItem, Menu, Sheet, SwitchItem, type MenuItemSpec } from "../components/m3"
-import { IAdd, IBell, IBellOff, IClock, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
+import { IAdd, IBell, IBellOff, IClock, ICloudOff, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
 import { SearchEngine } from "../lib/search"
 import { useBackgroundAccounts } from "../lib/backgroundAccounts"
 import { syncWebPush } from "../lib/webpush"
@@ -260,6 +262,14 @@ export function Chat() {
 	const [keyVersion, setKeyVersion] = useState(0)
 	const [showNew, setShowNew] = useState(false)
 	const [error, setError] = useState<string | null>(null)
+	// No server: the app reads what the device kept (lib/offline.ts). Errors
+	// of requests that could not go out are not shown meanwhile, and are
+	// cleared once the server answers again.
+	const [offline, setOffline] = useState(isOffline)
+	useEffect(() => onOfflineChange((next) => {
+		setOffline(next)
+		if (!next) setError(null)
+	}), [])
 	const [loadingMessages, setLoadingMessages] = useState(false)
 	const [loadingOlder, setLoadingOlder] = useState(false)
 	const [hasMore, setHasMore] = useState(false)
@@ -372,6 +382,10 @@ export function Chat() {
 
 	const currentUserId = user?.id ?? ""
 	const call = useCall(currentUserId, t("callRefused"))
+	// An update restart waits for calls and uploads to end (lib/appUpdate.ts).
+	const updateBlocked = Boolean(call.callId || call.incoming) || pendingUploads.length > 0
+	useEffect(() => (updateBlocked ? holdUpdates() : undefined), [updateBlocked])
+	useEffect(() => onBeforeRestart(() => rememberOpenChat(activeIdRef.current)), [])
 	const noteCall = call.noteCall
 	// Whether the chat has a call going on, so it can be joined from there.
 	const refreshChatCall = useCallback((conversationId: string) => {
@@ -410,13 +424,16 @@ export function Chat() {
 		if (pending.length === 0) return
 		for (const m of pending) {
 			sentReceiptsRef.current.add(m.id)
-			void api.sendReceipt(target, { messageId: m.id, state: "read" }).catch(() => undefined)
+			// Not sent (offline): tried again when the chat reloads.
+			void api.sendReceipt(target, { messageId: m.id, state: "read" }).catch(() => { sentReceiptsRef.current.delete(m.id) })
 		}
 		setReadIds((prev: any) => { const next = new Set(prev); for (const m of pending) next.add(m.id); return next })
 	}, [activeId, rawMessages, currentUserId])
 	const callHandleRef = useRef(call.handleEvent)
 	callHandleRef.current = call.handleEvent
 	const conversationsRef = useRef(conversations)
+	// Set once the list came from the server (or the device's copy of it).
+	const conversationsLoadedRef = useRef(false)
 	conversationsRef.current = conversations
 	const refreshPolls = useCallback(async (conversationId: string) => { const result=await api.listPolls(conversationId); setPolls(result.polls) }, [])
 
@@ -491,8 +508,12 @@ export function Chat() {
 			.listConversations()
 			.then((res) => {
 				if (!active) return
+				conversationsLoadedRef.current = true
 				setConversations(res.conversations)
-				setActiveId((prev) => prev ?? res.conversations.find((conversation) => !conversation.archivedAt)?.id ?? res.conversations[0]?.id ?? null)
+				// After an update restart the chat that was open opens again.
+				const reopened = takeReopenedChat()
+				const reopen = reopened && res.conversations.some((conversation) => conversation.id === reopened) ? reopened : null
+				setActiveId((prev) => prev ?? reopen ?? res.conversations.find((conversation) => !conversation.archivedAt)?.id ?? res.conversations[0]?.id ?? null)
 				void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {})
 				void api.listGroupInvites().then((r) => setGroupInvites(r.invites)).catch(() => {})
 				let pendingInvite: string | null = null
@@ -625,6 +646,27 @@ export function Chat() {
 		}
 	}, [activeId])
 
+	// The open chat as it is now (live messages, edits, deletions) and the chat
+	// list with its live changes go to the device's copy, for reading offline.
+	useEffect(() => {
+		const account = getActiveAccountId()
+		if (!activeId || !account || loadingMessages) return
+		const conversationId = activeId
+		const timer = window.setTimeout(() => {
+			void storeOpenChat(account, conversationId, rawMessages, hasMore, hasNewer).catch(() => undefined)
+		}, 800)
+		return () => window.clearTimeout(timer)
+	}, [activeId, rawMessages, hasMore, hasNewer, loadingMessages])
+
+	useEffect(() => {
+		const account = getActiveAccountId()
+		if (!account || !conversationsLoadedRef.current) return
+		const timer = window.setTimeout(() => {
+			void saveResponse(account, "/api/conversations", { conversations })
+		}, 1000)
+		return () => window.clearTimeout(timer)
+	}, [conversations])
+
 	useEffect(() => {
 		if (!activeId || !keyReady) return
 		let active = true
@@ -728,10 +770,12 @@ export function Chat() {
 		if (event.type === "friend.request") { void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {}); return }
 		if (event.type === "group.invite") { setGroupInvites((prev) => prev.some((gi) => gi.id === event.invite.id) ? prev : [event.invite, ...prev]); return }
 		if (event.type === "friend.accepted") { setConversations((prev)=>prev.some((c)=>c.id===event.conversation.id)?prev:[event.conversation,...prev]); setActiveId(event.conversation.id); return }
-		if (event.type === "friend.removed") { setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId)); if (activeIdRef.current === event.conversationId) setActiveId(null); if (event.by !== currentUserId) window.alert(t("youWereRemoved")); return }
+		if (event.type === "friend.removed") { const account = getActiveAccountId(); if (account) void forgetConversation(account, event.conversationId); setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId)); if (activeIdRef.current === event.conversationId) setActiveId(null); if (event.by !== currentUserId) window.alert(t("youWereRemoved")); return }
 		if (event.type === "conversation.added") { setConversations((prev)=>prev.some((c)=>c.id===event.conversation.id)?prev:[event.conversation,...prev]); return }
 		if (event.type === "conversation.deleted") {
 			const gone = conversationsRef.current.find((c) => c.id === event.conversationId)
+			const account = getActiveAccountId()
+			if (account) void forgetConversation(account, event.conversationId)
 			setConversations((prev)=>prev.filter((c)=>c.id!==event.conversationId))
 			if (activeIdRef.current === event.conversationId) setActiveId(null)
 			if (call.activeConversationId === event.conversationId) void call.leave()
@@ -907,6 +951,15 @@ export function Chat() {
 			// Call events missed while the connection was away.
 			call.resync()
 			if (current) refreshChatCall(current)
+			// After a time offline the list, folders and the open chat's details
+			// may have come from the device's copy: bring them up to date.
+			void api.listConversations().then((res) => { conversationsLoadedRef.current = true; setConversations(res.conversations) }).catch(() => undefined)
+			void refreshFolders().catch(() => undefined)
+			if (current) {
+				void api.listReactions(current).then((res) => { if (activeIdRef.current === current) setReactions(res.reactions) }).catch(() => undefined)
+				void api.listPinnedMessages(current).then((res) => { if (activeIdRef.current === current) setPinned(res.pinned) }).catch(() => undefined)
+				void api.getConversationMembers(current).then((res) => { if (activeIdRef.current === current) setMembers(res.members) }).catch(() => undefined)
+			}
 			if (!current || hasNewerRef.current) return
 			void api.getConversationPresence(current).then((res) => { setOnlineUserIds(res.onlineUserIds); mergeLastSeen(res.lastSeen) }).catch(() => undefined)
 			void api
@@ -2359,7 +2412,7 @@ export function Chat() {
 				<div className="sidebar-header">
 					<div className="brand">
 						<BrandLogo size={30} />
-						<span>FrontierX</span>
+						<span>{offline ? t("offlineShort") : "FrontierX"}</span>
 					</div>
 					<IconButton label={t("friendRequests")} onClick={() => setShowFriends(true)} className="sidebar-header-btn">
 						<IPeople />
@@ -2472,7 +2525,12 @@ export function Chat() {
 						{keys.message}
 					</Banner>
 				) : null}
-				{error ? <div className="banner error" onClick={() => setError(null)}>{error}</div> : null}
+				{offline ? (
+					<Banner tone="info" icon={<ICloudOff />} title={t("offlineTitle")} className="main-banner offline-banner">
+						{t("offlineBody")}
+					</Banner>
+				) : null}
+				{error && !offline ? <div className="banner error" onClick={() => setError(null)}>{error}</div> : null}
 				{call.error ? (
 					<Banner tone="error" icon={<IPhoneCall />} className="main-banner" actions={<Button variant="text" onClick={call.clearError}>{t("close")}</Button>}>
 						{call.error}

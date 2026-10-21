@@ -1,7 +1,7 @@
 {
   "name": "@frontierx/desktop",
   "private": true,
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "FrontierX desktop app for Linux, Windows and macOS (Electron shell around the web client).",
   "main": "main.cjs",
   "scripts": {

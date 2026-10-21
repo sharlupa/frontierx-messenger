@@ -67,14 +67,19 @@ function SettingsShell(props: { user: User; onUpdated: (user: User) => void; ini
 	const wide = useWide()
 	const [page, setPage] = useState<SettingsPageId>(props.initialPage ?? "home")
 	const [direction, setDirection] = useState<"forward" | "back">("forward")
+	// The first page arrives with the sheet itself; only moving between pages
+	// slides the content (two slides at once made opening stutter on phones).
+	const [moved, setMoved] = useState(false)
 	const [signingOut, setSigningOut] = useState(false)
 
 	const open = (next: SettingsPageId) => {
 		setDirection("forward")
+		setMoved(true)
 		setPage(next)
 	}
 	const back = () => {
 		setDirection("back")
+		setMoved(true)
 		setPage("home")
 	}
 
@@ -111,7 +116,7 @@ function SettingsShell(props: { user: User; onUpdated: (user: User) => void; ini
 		<div className={"settings-layout" + (wide ? " wide" : "")}>
 			{wide ? (
 				<nav className="settings-rail" aria-label={t("settingsTitle")}>
-					<button type="button" className={"settings-rail-profile" + (page === "home" ? " selected" : "")} onClick={() => { setDirection("back"); setPage("home") }}>
+					<button type="button" className={"settings-rail-profile" + (page === "home" ? " selected" : "")} onClick={() => { setDirection("back"); setMoved(true); setPage("home") }}>
 						<Avatar src={props.user.avatar} label={props.user.displayName || props.user.username} seed={props.user.id} size={44} />
 						<span className="settings-rail-profile-text">
 							<span className="settings-rail-name">{props.user.displayName || props.user.username}</span>
@@ -141,7 +146,7 @@ function SettingsShell(props: { user: User; onUpdated: (user: User) => void; ini
 					</IconButton>
 				</header>
 				<div className="settings-scroll">
-					<div key={page} className={"m3-page settings-page" + (direction === "back" ? " back" : "")}>
+					<div key={page} className={(moved ? "m3-page " : "") + "settings-page" + (direction === "back" ? " back" : "")}>
 						{body}
 					</div>
 				</div>
@@ -162,7 +167,7 @@ function SettingsHome(props: { user: User; wide: boolean; onOpen: (page: Setting
 		<div className="settings-home">
 			<section className="settings-hero">
 				<span className="settings-hero-art" aria-hidden="true">
-					<MorphBlob className="settings-hero-blob" size={220} shapes={[1, 6, 7, 2]} morphMs={1200} holdMs={1800} />
+					<MorphBlob className="settings-hero-blob" size={220} shapes={[1, 6, 7, 2]} morphMs={1200} holdMs={1800} delayMs={600} />
 				</span>
 				<Avatar src={props.user.avatar} label={props.user.displayName || props.user.username} seed={props.user.id} size={96} className="settings-hero-avatar" />
 				<h3 className="settings-hero-name">{props.user.displayName || props.user.username}</h3>

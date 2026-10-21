@@ -1,6 +1,7 @@
 import { createElement, useEffect, useRef, useState } from "react"
 import type { ChangeEvent, ClipboardEvent, KeyboardEvent, PointerEvent as ReactPointerEvent } from "react"
 import { formatBytes } from "../lib/i18n"
+import { holdUpdates } from "../lib/appUpdate"
 import { useSettings } from "../state/settings"
 import { EmojiPanel } from "./EmojiPanel"
 import type { BotCommand, SendOptions, Sticker } from "../lib/types"
@@ -154,6 +155,8 @@ export function Composer({
 	const recorderRef = useRef<VoiceRecorder | null>(null)
 	const tickRef = useRef<number | null>(null)
 	const [recording, setRecording] = useState(false)
+	// A voice note being recorded is never cut short by an update restart.
+	useEffect(() => (recording ? holdUpdates() : undefined), [recording])
 	const [elapsed, setElapsed] = useState(0)
 	const [levels, setLevels] = useState<number[]>([])
 	const [voiceError, setVoiceError] = useState<string | null>(null)

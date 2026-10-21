@@ -47,6 +47,13 @@ async function download(url, target, onProgress) {
 }
 
 async function install(serverUrl, latest) {
+	// Mac builds come per processor (Apple silicon, Intel) as a zip that is
+	// dragged to Applications, and the manifest names one file: the download
+	// page offers the right one instead.
+	if (process.platform === "darwin") {
+		await shell.openExternal(joinUrl(serverUrl, "/download#macos"))
+		return
+	}
 	const win = BrowserWindow.getAllWindows()[0] || null
 	const fileUrl = /^https?:\/\//i.test(latest.url) ? latest.url : joinUrl(serverUrl, latest.url)
 	let name = "frontierx-update"

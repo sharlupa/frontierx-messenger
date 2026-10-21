@@ -57,12 +57,15 @@
 
 /* --- sheets ------------------------------------------------------------------------ */
 
+/* Sheets move with transform and opacity only: those run on the compositor,
+   so opening stays smooth while the main thread renders the sheet's content.
+   (A border-radius in the keyframes made every frame wait for it.) */
 @keyframes m3-sheet-in {
-	from { opacity: 0; transform: translateY(26px) scale(0.86); border-radius: 64px; }
-	to { opacity: 1; transform: none; border-radius: 28px; }
+	from { opacity: 0; transform: translateY(26px) scale(0.86); }
+	to { opacity: 1; transform: none; }
 }
 @keyframes m3-sheet-out {
-	to { opacity: 0; transform: translateY(18px) scale(0.93); border-radius: 52px; }
+	to { opacity: 0; transform: translateY(18px) scale(0.93); }
 }
 @keyframes m3-scrim-out {
 	to { opacity: 0; }
@@ -149,8 +152,8 @@ body.m3-sheet-open {
 }
 
 @keyframes m3-sheet-up {
-	from { transform: translateY(45%); opacity: 0.3; border-radius: 56px 56px 0 0; }
-	to { transform: none; opacity: 1; border-radius: 28px 28px 0 0; }
+	from { transform: translateY(45%); opacity: 0.3; }
+	to { transform: none; opacity: 1; }
 }
 @keyframes m3-sheet-down {
 	to { transform: translateY(60%); opacity: 0; }
@@ -159,6 +162,11 @@ body.m3-sheet-open {
 	.m3-scrim {
 		place-items: end center;
 		padding: env(safe-area-inset-top) 0 0;
+		/* The sheet covers nearly the whole screen; blurring what is under it
+		   cost a full-screen repaint on every frame of the slide. */
+		-webkit-backdrop-filter: none;
+		backdrop-filter: none;
+		background: color-mix(in srgb, #000 54%, transparent);
 	}
 	.m3-sheet,
 	.m3-sheet.size-sm,
@@ -170,6 +178,7 @@ body.m3-sheet-open {
 		padding-bottom: env(safe-area-inset-bottom);
 		animation: m3-sheet-up 460ms var(--m3-spring) both;
 		transition: transform 220ms var(--m3-spring);
+		will-change: transform, opacity;
 	}
 	.m3-sheet.size-xl {
 		height: calc(100dvh - env(safe-area-inset-top) - 12px);

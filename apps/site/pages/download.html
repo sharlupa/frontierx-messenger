@@ -82,8 +82,9 @@
 			</dl>
 			<div class="alt" data-alt></div>
 			<ol class="num-steps">
-				<li data-i18n="dl.and.1">Скачайте APK на телефон.</li>
+				<li data-i18n-html="dl.and.1">Скачайте APK на телефон. Chrome может предупредить, что файл опасен, — нажмите <b>«Всё равно скачать»</b>.</li>
 				<li data-i18n="dl.and.2">Разрешите браузеру установку из этого источника — Android спросит об этом сам.</li>
+				<li data-i18n-html="dl.and.4">Если Play Защита скажет, что приложение неизвестно или может быть небезопасно, — <b>«Подробнее» → «Всё равно установить»</b>. Так она реагирует на любое приложение не из Google Play.</li>
 				<li data-i18n="dl.and.3">Следующие версии приложение предложит само.</li>
 			</ol>
 		</article>
@@ -104,14 +105,14 @@
 				<li data-i18n-html="dl.ios.2">Нажмите «Поделиться» и выберите <b>«На экран „Домой“»</b>.</li>
 				<li data-i18n="dl.ios.3">Запустите FrontierX с экрана «Домой», войдите и разрешите уведомления — они будут приходить и при закрытом приложении.</li>
 			</ol>
-			<p class="notes" data-i18n="dl.ios.note">Отдельное приложение для iPhone собирается только на Mac в Xcode и ставится через TestFlight или App Store — файла для загрузки нет: iPhone не устанавливает приложения с сайтов.</p>
+			<p class="notes" data-i18n="dl.ios.note">Файла для iPhone нет: iPhone ставит приложения только из App Store и TestFlight, с сайта — никак. Версия с экрана «Домой» — полноценный FrontierX: чаты, звонки и уведомления при закрытом приложении.</p>
 		</article>
 		<article class="dl-card" id="macos" data-os="macos" data-reveal data-shape-host>
 			<div class="dl-top">
 				<span class="shape os-ic tertiary" data-shape="cookie6" data-shape-to="square"><svg aria-hidden="true"><use href="#os-apple" /></svg></span>
 				<div>
 					<h2>macOS</h2>
-					<p class="state" data-i18n="dl.mac.sub">dmg · Apple Silicon и Intel</p>
+					<p class="state" data-i18n="dl.mac.sub">zip · Apple Silicon (M1–M4), есть сборка для Intel · macOS 10.15 и новее</p>
 				</div>
 				<span class="badge" data-i18n="dl.badge">Ваша система</span>
 				<div class="dl-actions">
@@ -126,8 +127,9 @@
 			</dl>
 			<div class="alt" data-alt></div>
 			<ol class="num-steps">
-				<li data-i18n="dl.mac.1">Откройте .dmg и перетащите FrontierX в «Программы».</li>
-				<li data-i18n="dl.mac.2">Первый запуск: правый клик по приложению → «Открыть» (сборка без подписи Apple).</li>
+				<li data-i18n="dl.mac.1">Скачайте архив — Safari сам распакует его в «Загрузки». Перетащите FrontierX в «Программы».</li>
+				<li data-i18n-html="dl.mac.2">Первый запуск: macOS скажет, что не может проверить разработчика, — нажмите <b>«Готово»</b>. Откройте <b>«Системные настройки» → «Конфиденциальность и безопасность»</b>, внизу нажмите <b>«Всё равно открыть»</b> и подтвердите паролем.</li>
+				<li data-i18n-html="dl.mac.4">На macOS 14 и старше проще: правый клик по приложению → <b>«Открыть»</b> → <b>«Открыть»</b>. Это нужно один раз — сборка не подписана сертификатом Apple, дальше FrontierX запускается как обычно.</li>
 				<li data-i18n="dl.mac.3">Без установки: откройте веб-версию в Safari → «Файл» → «Добавить в Dock» (macOS 14 и новее).</li>
 			</ol>
 		</article>

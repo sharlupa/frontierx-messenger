@@ -18,6 +18,7 @@ import {
 } from "../lib/session"
 import { nativeClearAuthToken, nativeSetAuthToken } from "../lib/native"
 import * as kv from "../lib/keyvault"
+import { forgetAccount as forgetOfflineCopy, onOfflineChange } from "../lib/offline"
 import { addIdentities, forgetAccountKeys, loadAccountKey } from "../lib/keystore"
 import { Keyring, setActiveKeyring, type KeySession } from "../lib/keyring"
 import {
@@ -189,6 +190,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		}
 	}, [runSetup, refreshAccounts])
 
+	// Keys that could not be set up without a network (nothing kept on the
+	// device yet) are set up as soon as the server answers again.
+	useEffect(() => {
+		if (keys.status !== "error" || !user) return
+		const userId = user.id
+		return onOfflineChange((offline) => {
+			if (!offline) void runSetup(userId, null)
+		})
+	}, [keys.status, user, runSetup])
+
 	// Any request answered 401 ends this account's session on this device; the
 	// account and its keys stay, so signing in again is enough.
 	useEffect(() => {
@@ -278,12 +289,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 	const removeAccountFromDevice = useCallback((accountId: string) => {
 		const wasActive = accountId === getActiveAccountId()
 		forgetAccountKeys(accountId)
+		// The chats kept for reading offline go with it; the restart waits for
+		// that, since leaving the page would cut the deletion short.
+		const forgotten = forgetOfflineCopy(accountId)
 		removeAccount(accountId)
 		refreshAccounts()
 		if (wasActive) {
 			nativeClearAuthToken()
 			setActiveKeyring(null)
-			reloadApp()
+			void forgotten.finally(reloadApp)
 		}
 	}, [refreshAccounts])
 
