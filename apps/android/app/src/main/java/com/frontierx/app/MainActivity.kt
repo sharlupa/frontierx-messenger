@@ -10,11 +10,18 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.view.Gravity
 import android.view.KeyEvent
+import android.view.View
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
@@ -26,7 +33,10 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.PickVisualMediaRequest
@@ -53,15 +63,19 @@ class MainActivity : AppCompatActivity() {
     private var pendingGeolocation: Pair<String, GeolocationPermissions.Callback>? = null
     private var backLongPressed = false
     private var pendingConversation: String? = null
+    // Opening the app without a network: the service worker normally answers
+    // with the app it keeps. When it cannot (first start, or it was not set up
+    // yet) the page is tried from the WebView's cache, and only when that has
+    // nothing either a "no connection" screen waits for the network.
+    private var pageFailed = false
+    private var triedCache = false
+    private var offlineView: View? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         val serverUrl = ServerConfig.getServerUrl(this)
-        if (serverUrl.isNullOrBlank()) {
-            openSetup()
-            return
-        }
 
         // The socket dies with the process, so an existing session brings the
         // delivery channel back up as soon as the app is opened.
@@ -187,7 +201,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                pageFailed = false
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
+                if (!pageFailed) {
+                    // Requests after the start go to the network again.
+                    webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+                    triedCache = false
+                    hideOffline()
+                }
                 syncSystemBarColor()
                 installDownloadHook()
                 deliverConversation()
@@ -200,12 +224,9 @@ class MainActivity : AppCompatActivity() {
                 error: WebResourceError?
             ) {
                 if (request?.isForMainFrame == true) {
-                    Toast.makeText(
-                        this@MainActivity,
-                        R.string.connect_failed,
-                        Toast.LENGTH_LONG
-                    ).show()
-                    openSetup()
+                    pageFailed = true
+                    val url = request.url.toString()
+                    webView.post { mainPageFailed(url) }
                 }
             }
         }
@@ -304,7 +325,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun isOwnOrigin(origin: String): Boolean {
-        val server = ServerConfig.getServerUrl(this) ?: return false
+        val server = ServerConfig.getServerUrl(this)
         return try {
             val a = Uri.parse(origin)
             val b = Uri.parse(server)
@@ -476,7 +497,7 @@ class MainActivity : AppCompatActivity() {
             return null
         }
         intent?.data = null
-        val server = ServerConfig.getServerUrl(this) ?: return null
+        val server = ServerConfig.getServerUrl(this)
         val code = data.lastPathSegment
         if (code.isNullOrBlank()) {
             return null
@@ -652,11 +673,111 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openSetup() {
-        val intent = Intent(this, SetupActivity::class.java)
-        intent.flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-        startActivity(intent)
-        finish()
+    private fun mainPageFailed(url: String) {
+        if (isFinishing || isDestroyed) return
+        if (!triedCache) {
+            triedCache = true
+            webView.settings.cacheMode = WebSettings.LOAD_CACHE_ONLY
+            webView.loadUrl(url)
+            return
+        }
+        webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        showOffline(url)
+    }
+
+    private fun showOffline(url: String) {
+        if (offlineView == null) {
+            val density = resources.displayMetrics.density
+            val pad = (24 * density).toInt()
+            val title = TextView(this).apply {
+                setText(R.string.offline_title)
+                setTextColor(ContextCompat.getColor(context, R.color.fx_text))
+                textSize = 22f
+                setTypeface(typeface, Typeface.BOLD)
+                gravity = Gravity.CENTER
+            }
+            val body = TextView(this).apply {
+                setText(R.string.offline_body)
+                setTextColor(ContextCompat.getColor(context, R.color.fx_muted))
+                textSize = 15f
+                gravity = Gravity.CENTER
+                setPadding(0, (10 * density).toInt(), 0, (24 * density).toInt())
+            }
+            val retry = Button(this).apply {
+                setText(R.string.offline_retry)
+                isAllCaps = false
+                textSize = 15f
+                setTextColor(ContextCompat.getColor(context, R.color.fx_text))
+                background = GradientDrawable().apply {
+                    cornerRadius = 100 * density
+                    setColor(ContextCompat.getColor(context, R.color.fx_accent))
+                }
+                stateListAnimator = null
+                setPadding((28 * density).toInt(), 0, (28 * density).toInt(), 0)
+                minHeight = (48 * density).toInt()
+                setOnClickListener { retryPage() }
+            }
+            val column = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(pad, pad, pad, pad)
+                setBackgroundColor(ContextCompat.getColor(context, R.color.fx_background))
+                isClickable = true
+                addView(title)
+                addView(body)
+                addView(retry, LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ))
+            }
+            rootView.addView(column, FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            ))
+            offlineView = column
+        }
+        offlineView?.tag = url
+        offlineView?.visibility = View.VISIBLE
+        watchNetwork()
+    }
+
+    private fun hideOffline() {
+        offlineView?.visibility = View.GONE
+        unwatchNetwork()
+    }
+
+    private fun retryPage() {
+        val url = offlineView?.tag as? String ?: ServerConfig.getServerUrl(this)
+        triedCache = false
+        webView.settings.cacheMode = WebSettings.LOAD_DEFAULT
+        webView.loadUrl(url)
+    }
+
+    // Loads the app again as soon as the phone is back online.
+    private fun watchNetwork() {
+        if (networkCallback != null) return
+        val connectivity = getSystemService(ConnectivityManager::class.java) ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                runOnUiThread {
+                    if (offlineView?.visibility == View.VISIBLE && !isFinishing) retryPage()
+                }
+            }
+        }
+        try {
+            connectivity.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun unwatchNetwork() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        try {
+            getSystemService(ConnectivityManager::class.java)?.unregisterNetworkCallback(callback)
+        } catch (e: Exception) {
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -685,6 +806,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        unwatchNetwork()
         fileChooserCallback?.onReceiveValue(null)
         fileChooserCallback = null
         if (::webView.isInitialized) {

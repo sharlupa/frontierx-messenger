@@ -168,7 +168,8 @@ async function request<T>(path: string, method: string, body?: unknown, tokenOve
 }
 
 type MessagePageQuery = { limit: number; before?: string | null; around?: string | null; after?: string | null }
-type MessagePageResult = { messages: MessageEnvelope[]; hasMore: boolean; hasNewer: boolean }
+// notSaved: read without a network, and the device has nothing of this chat.
+type MessagePageResult = { messages: MessageEnvelope[]; hasMore: boolean; hasNewer: boolean; notSaved?: boolean }
 
 // A page of a chat: from the server, kept in the chat's store on the device;
 // from that store when the server cannot be reached.
@@ -185,7 +186,8 @@ function readMessagePage(conversationId: string, query: MessagePageQuery): Promi
 	return readWithFallback(
 		load,
 		async () => {
-			const stored = await offline.loadMessages(account, conversationId)
+			const stored = await offline.loadSavedMessages(account, conversationId)
+			if (stored === null) return { messages: [], hasMore: false, hasNewer: false, notSaved: true }
 			return offline.pageFromStore(stored, query) ?? undefined
 		},
 		async (page) => {
@@ -312,7 +314,7 @@ export const api = {
 	saveConversationDraft(conversationId: string, ciphertext: string | null) {
 		return request<{ draft: ConversationDraft | null }>("/api/conversations/" + conversationId + "/draft", "POST", { ciphertext })
 	},
-	listMessages(conversationId: string, opts: { limit?: number; before?: string | null } = {}): Promise<{ messages: MessageEnvelope[]; hasMore: boolean; hasNewer?: boolean }> {
+	listMessages(conversationId: string, opts: { limit?: number; before?: string | null } = {}): Promise<{ messages: MessageEnvelope[]; hasMore: boolean; hasNewer?: boolean; notSaved?: boolean }> {
 		return readMessagePage(conversationId, { limit: opts.limit ?? 50, before: opts.before ?? null })
 	},
 	sendMessage(conversationId: string, input: { ciphertext: string; replyTo?: string | null; silent?: boolean }) {

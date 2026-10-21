@@ -110,7 +110,7 @@ class FxDownloads(private val activity: Activity) {
         activity.runOnUiThread {
             try {
                 Push.setSession(activity, token, ServerConfig.getServerUrl(activity))
-                val server = ServerConfig.getServerUrl(activity) ?: ServerConfig.DEFAULT_URL
+                val server = ServerConfig.getServerUrl(activity)
                 // The own socket (and its ongoing notification) is only needed
                 // when the phone's push channel cannot be used. While FCM worked
                 // last time the socket stays off; it is started if FCM fails.
@@ -146,7 +146,7 @@ class FxDownloads(private val activity: Activity) {
     fun checkUpdates() {
         activity.runOnUiThread {
             Toast.makeText(activity, R.string.update_checking, Toast.LENGTH_SHORT).show()
-            Updater.check(activity, ServerConfig.getServerUrl(activity) ?: ServerConfig.DEFAULT_URL) { release ->
+            Updater.check(activity, ServerConfig.getServerUrl(activity)) { release ->
                 if (activity.isFinishing || activity.isDestroyed) return@check
                 if (release == null) {
                     Toast.makeText(activity, R.string.update_up_to_date, Toast.LENGTH_LONG).show()

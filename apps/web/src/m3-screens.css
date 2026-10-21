@@ -3136,6 +3136,14 @@ html {
 	font-size: 11px;
 }
 
+/* The offline banner sits on the chat header's own surface, so the header
+   just grows by a line instead of a dark gap opening above it. */
+.offline-strip {
+	flex: 0 0 auto;
+	padding: 10px 14px 2px;
+	background: var(--bg-header);
+}
+
 /* On a phone the offline banner is one line: the details would cost a fifth
    of the screen, and the chat list already says it is waiting for network. */
 @media (max-width: 720px) {

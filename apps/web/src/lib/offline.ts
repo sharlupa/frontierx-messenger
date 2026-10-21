@@ -250,9 +250,14 @@ export function rangeOfPage(page: MessagePage, query: { before?: string | null; 
 }
 
 async function readMessages(database: IDBDatabase, key: string): Promise<MessageEnvelope[]> {
+	return (await readMessagesOrNull(database, key)) ?? []
+}
+
+// null: the chat was never saved on this device (not the same as empty).
+async function readMessagesOrNull(database: IDBDatabase, key: string): Promise<MessageEnvelope[] | null> {
 	const transaction = database.transaction(MESSAGES, "readonly")
 	const record = await requestValue(transaction.objectStore(MESSAGES).get(key) as IDBRequest<MessagesRecord | undefined>)
-	return record ? record.messages : []
+	return record ? record.messages : null
 }
 
 // Writes of one chat run one after another, so two answers arriving together
@@ -269,16 +274,21 @@ function queued(key: string, run: () => Promise<void>): Promise<void> {
 	return next
 }
 
-export function loadMessages(account: string, conversationId: string): Promise<MessageEnvelope[]> {
+export async function loadMessages(account: string, conversationId: string): Promise<MessageEnvelope[]> {
+	return (await loadSavedMessages(account, conversationId)) ?? []
+}
+
+// Like loadMessages, with null for a chat this device never saved.
+export function loadSavedMessages(account: string, conversationId: string): Promise<MessageEnvelope[] | null> {
 	const key = recordKey(account, conversationId)
 	// Waits for writes in flight, so a page read right after one sees it.
 	return (messageQueue.get(key) ?? Promise.resolve()).then(async () => {
 		const database = await openDatabase()
-		if (!database) return []
+		if (!database) return null
 		try {
-			return await readMessages(database, key)
+			return await readMessagesOrNull(database, key)
 		} catch {
-			return []
+			return null
 		}
 	})
 }

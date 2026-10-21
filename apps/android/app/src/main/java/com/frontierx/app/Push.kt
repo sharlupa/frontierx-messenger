@@ -49,7 +49,7 @@ object Push {
     private fun baseUrl(context: Context): String {
         val stored = prefs(context).getString(KEY_BASE, "").orEmpty()
         if (stored.isNotBlank()) return stored
-        return ServerConfig.getServerUrl(context).orEmpty().trimEnd('/')
+        return ServerConfig.getServerUrl(context)
     }
 
     // Called from the JS bridge when the web app has an authenticated session.
@@ -59,7 +59,7 @@ object Push {
             clearSession(activity)
             return
         }
-        val server = if (base.isNullOrBlank()) ServerConfig.getServerUrl(activity).orEmpty() else base
+        val server = if (base.isNullOrBlank()) ServerConfig.getServerUrl(activity) else base
         val store = prefs(activity)
         val previous = store.getString(KEY_TOKEN, "").orEmpty()
         store.edit()

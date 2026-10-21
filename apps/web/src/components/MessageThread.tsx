@@ -780,6 +780,7 @@ members = [],
 	onVotePoll,
 	onClosePoll,
 	isSelf = false,
+	notSaved = false,
 	readIds = null,
 	conversationId = null,
 	pending = [],
@@ -823,6 +824,8 @@ members?: ConversationMember[]
 	onVotePoll: (messageId: string, optionIndexes: number[]) => Promise<void>
 	onClosePoll: (messageId: string) => Promise<void>
 	isSelf?: boolean
+	// Read without a network, and the device has nothing of this chat yet.
+	notSaved?: boolean
 	conversationId?: string | null
 	pending?: PendingUpload[]
 	queued?: Array<{ id: string; body: string; createdAt: string }>
@@ -1238,7 +1241,7 @@ members?: ConversationMember[]
 					<span className="thread-empty-art">
 						<MorphBlob size={160} shapes={isSelf ? [7, 1, 4] : [6, 2, 1, 4]} />
 					</span>
-					<p>{isSelf ? t("savedEmpty") : t("noMessages")}</p>
+					<p>{notSaved ? t("chatNotSaved") : isSelf ? t("savedEmpty") : t("noMessages")}</p>
 				</div>
 			) : null}
 			{contextMenu ? (

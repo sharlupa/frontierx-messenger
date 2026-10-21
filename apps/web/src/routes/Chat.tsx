@@ -9,6 +9,7 @@ import { isSealedMessage } from "../lib/keyvault"
 import { activeKeyring, KeyUnavailableError, type Keyring } from "../lib/keyring"
 import { accountKey, adoptLegacyPreference, getActiveAccountId } from "../lib/session"
 import { forgetConversation, isOffline, onOfflineChange, saveResponse, storeOpenChat } from "../lib/offline"
+import { syncChatSoon, syncChats } from "../lib/offlineSync"
 import { holdUpdates, onBeforeRestart, rememberOpenChat, takeReopenedChat } from "../lib/appUpdate"
 import type { BotCommand, Conversation, ConversationFolder, ConversationMember, DisplayMessage, LinkRequestInfo, MemberRole, MessageEnvelope, PinnedMessage, Reaction, PollSummary, SendOptions, Sticker, WsEvent } from "../lib/types"
 import { ConversationList } from "../components/ConversationList"
@@ -266,6 +267,8 @@ export function Chat() {
 	// of requests that could not go out are not shown meanwhile, and are
 	// cleared once the server answers again.
 	const [offline, setOffline] = useState(isOffline)
+	// The open chat was read without a network and this device has none of it.
+	const [chatNotSaved, setChatNotSaved] = useState(false)
 	useEffect(() => onOfflineChange((next) => {
 		setOffline(next)
 		if (!next) setError(null)
@@ -604,6 +607,7 @@ export function Chat() {
 			return next
 		})
 		setHasNewer(false)
+		setChatNotSaved(false)
 		const jump = pendingJumpRef.current && pendingJumpRef.current.conversationId === conversationId ? pendingJumpRef.current : null
 		pendingJumpRef.current = null
 		const loadPage = jump ? api.messagesAround(conversationId, jump.messageId, PAGE_SIZE) : api.listMessages(conversationId, { limit: PAGE_SIZE })
@@ -613,6 +617,7 @@ export function Chat() {
 				setRawMessages(res.messages)
 				setHasMore(res.hasMore)
 				setHasNewer(Boolean(res.hasNewer))
+				setChatNotSaved(Boolean(res.notSaved))
 				if (jump) window.setTimeout(() => setJumpToId(jump.messageId), 60)
 			})
 			.catch((err) => {
@@ -838,6 +843,8 @@ export function Chat() {
 			}
 			void searchEngineRef.current?.addLive(message)
 			if (message.conversationId !== activeIdRef.current) {
+				const account = getActiveAccountId()
+				if (account) syncChatSoon(account, message.conversationId)
 				// Your own message from another device is not news.
 				if (message.senderId !== currentUserId) {
 					setUnread((prev) => {
@@ -953,7 +960,16 @@ export function Chat() {
 			if (current) refreshChatCall(current)
 			// After a time offline the list, folders and the open chat's details
 			// may have come from the device's copy: bring them up to date.
-			void api.listConversations().then((res) => { conversationsLoadedRef.current = true; setConversations(res.conversations) }).catch(() => undefined)
+			void api.listConversations().then((res) => {
+				conversationsLoadedRef.current = true
+				setConversations(res.conversations)
+				// Every chat goes to the device's copy, not only the opened ones.
+				const account = getActiveAccountId()
+				if (account && !isOffline()) {
+					const order = (conversation: Conversation) => (conversation.archivedAt ? 3 : conversation.isSelf ? 0 : pinnedChats.includes(conversation.id) ? 1 : 2)
+					syncChats(account, [...res.conversations].sort((a, b) => order(a) - order(b)).map((conversation) => conversation.id))
+				}
+			}).catch(() => undefined)
 			void refreshFolders().catch(() => undefined)
 			if (current) {
 				void api.listReactions(current).then((res) => { if (activeIdRef.current === current) setReactions(res.reactions) }).catch(() => undefined)
@@ -967,6 +983,7 @@ export function Chat() {
 				.then((res) => {
 					setRawMessages(res.messages)
 					setHasMore(res.hasMore)
+					setChatNotSaved(Boolean(res.notSaved))
 				})
 				.catch(() => undefined)
 		}
@@ -1082,6 +1099,7 @@ export function Chat() {
 				setRawMessages(res.messages)
 				setHasMore(res.hasMore)
 				setHasNewer(false)
+				setChatNotSaved(Boolean(res.notSaved))
 			})
 			.catch((err) => setError(errMessage(err, tt("loadMessagesFailed"))))
 			.finally(() => setLoadingNewer(false))
@@ -1815,7 +1833,11 @@ export function Chat() {
 			return peer ? lastSeen[peer.userId] ?? null : null
 		})()
 		: null
-	const presenceLabel = members.length === 0
+	// Without a network nobody's status can be known; the last one seen would
+	// pass for the current one.
+	const presenceLabel = offline
+		? t("presenceOffline")
+		: members.length === 0
 		? t("checkingPresence")
 		: onlineOtherMemberCount === 0
 			? (activeConversation?.kind === "direct"
@@ -2526,9 +2548,11 @@ export function Chat() {
 					</Banner>
 				) : null}
 				{offline ? (
-					<Banner tone="info" icon={<ICloudOff />} title={t("offlineTitle")} className="main-banner offline-banner">
-						{t("offlineBody")}
-					</Banner>
+					<div className="offline-strip">
+						<Banner tone="info" icon={<ICloudOff />} title={t("offlineTitle")} className="offline-banner">
+							{t("offlineBody")}
+						</Banner>
+					</div>
 				) : null}
 				{error && !offline ? <div className="banner error" onClick={() => setError(null)}>{error}</div> : null}
 				{call.error ? (
@@ -2598,7 +2622,7 @@ export function Chat() {
 							<OngoingCallBar count={call.ongoing[activeConversation.id].length} busy={call.joining || !canSend} onJoin={() => startCall(activeConversation.id)} />
 						) : null}
 						<MessageThread
-							members={members} messages={filteredDisplay} isSelf={Boolean(activeConversation.isSelf)} readIds={readIds} conversationId={activeConversation.id}
+							members={members} messages={filteredDisplay} isSelf={Boolean(activeConversation.isSelf)} notSaved={chatNotSaved} readIds={readIds} conversationId={activeConversation.id}
 							reactions={reactions}
 							currentUserId={currentUserId}
 							loading={loadingMessages}
