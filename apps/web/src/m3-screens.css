@@ -3151,3 +3151,85 @@ html {
 		display: none;
 	}
 }
+
+/* --- chat list: the ⋮ menu and the archive ------------------------------------ */
+
+.conv-list {
+	/* A pull at the top opens the archive, never the browser's reload. */
+	overscroll-behavior-y: contain;
+}
+.conv-pull {
+	display: flex;
+	align-items: flex-end;
+	justify-content: center;
+	overflow: hidden;
+	color: var(--text-muted);
+	font-size: 13px;
+	font-weight: 600;
+}
+.conv-pull.idle {
+	transition: height 220ms var(--m3-spring-fast);
+}
+.conv-pull-hint {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+	padding: 6px 14px;
+	border-radius: 999px;
+	background: var(--m3-surface-container-highest);
+	transition: background-color 160ms var(--m3-effects), color 160ms var(--m3-effects);
+}
+.conv-pull.ready .conv-pull-hint {
+	background: var(--m3-primary-container);
+	color: var(--m3-on-primary-container);
+}
+.conv-pull-arrow {
+	display: grid;
+	place-items: center;
+	width: 26px;
+	height: 26px;
+	margin-left: -8px;
+	border-radius: 50%;
+	background: var(--bg-elevated);
+	color: var(--text);
+	transition:
+		rotate var(--m3-dur) var(--m3-spring-bouncy),
+		background-color 160ms var(--m3-effects),
+		color 160ms var(--m3-effects);
+}
+.conv-pull.ready .conv-pull-arrow {
+	rotate: 180deg;
+	background: var(--accent);
+	color: var(--on-accent);
+}
+
+.archive-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 2px 10px 6px;
+}
+.archive-head-title {
+	font-size: 17px;
+	font-weight: 700;
+	color: var(--text-strong);
+}
+
+/* The ghost mode row of the ⋮ menu shows its state as a small switch. */
+.m3-switch.menu-switch {
+	display: inline-block;
+	width: 40px;
+	height: 24px;
+	cursor: inherit;
+}
+.m3-switch.menu-switch .m3-switch-thumb {
+	width: 14px;
+	height: 14px;
+	left: 3px;
+}
+.m3-switch.menu-switch.on .m3-switch-thumb {
+	left: 19px;
+	width: 14px;
+	height: 14px;
+}

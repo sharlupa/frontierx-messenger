@@ -1,7 +1,16 @@
+import { useRef, useState } from "react"
+import type { TouchEvent as ReactTouchEvent } from "react"
 import type { Conversation } from "../lib/types"
 import { useSettings } from "../state/settings"
 import { IconBookmark, IconPin, IconBellOff } from "./Icons"
 import { useContextMenuGesture } from "../lib/longpress"
+import { IArrowDown } from "./m3icons"
+
+// Pulling the list down from its top opens the archive, as in Telegram: the
+// finger moves the hint about half as far as it travels, and letting go past
+// this point opens it.
+const PULL_OPEN_PX = 64
+const PULL_MAX_PX = 96
 
 const AVATAR_COLORS = ["#e17076", "#7bc862", "#65aadd", "#a695e7", "#ee7aae", "#6ec9cb", "#f2a45c"]
 
@@ -28,6 +37,7 @@ export function ConversationList({
 	onlinePeerIds,
 	emptyLabel,
 	onContextMenu,
+	onPullOpen,
 }: {
 	conversations: Conversation[]
 	activeId: string | null
@@ -38,8 +48,56 @@ export function ConversationList({
 	onlinePeerIds?: string[]
 	emptyLabel?: string
 	onContextMenu?: (conversation: Conversation, x: number, y: number) => void
+	onPullOpen?: () => void
 }) {
 	const { t } = useSettings()
+	const [pull, setPull] = useState(0)
+	const pullStart = useRef<number | null>(null)
+	const endPull = () => {
+		if (pull >= PULL_OPEN_PX) onPullOpen?.()
+		pullStart.current = null
+		setPull(0)
+	}
+	const pullHandlers = onPullOpen
+		? {
+			onTouchStart: (event: ReactTouchEvent<HTMLDivElement>) => {
+				pullStart.current = event.currentTarget.scrollTop <= 0 && event.touches.length === 1 ? event.touches[0].clientY : null
+			},
+			onTouchMove: (event: ReactTouchEvent<HTMLDivElement>) => {
+				if (pullStart.current === null) return
+				const travel = event.touches[0].clientY - pullStart.current
+				// Scrolling the list up instead: not a pull.
+				if (travel < 0 || event.currentTarget.scrollTop > 0) {
+					pullStart.current = null
+					setPull(0)
+					return
+				}
+				const next = Math.min(PULL_MAX_PX, travel * 0.5)
+				if (next >= PULL_OPEN_PX && pull < PULL_OPEN_PX) {
+					try {
+						navigator.vibrate?.(10)
+					} catch {
+						// no vibration here
+					}
+				}
+				setPull(next)
+			},
+			onTouchEnd: endPull,
+			onTouchCancel: () => {
+				pullStart.current = null
+				setPull(0)
+			},
+		}
+		: {}
+	const pullHint = onPullOpen ? (
+		<div className={"conv-pull" + (pull === 0 ? " idle" : "") + (pull >= PULL_OPEN_PX ? " ready" : "")} style={{ height: pull }} aria-hidden="true">
+			<span className="conv-pull-hint">
+				{/* Points down while pulling, turns up once letting go opens the archive. */}
+				<span className="conv-pull-arrow"><IArrowDown size={16} /></span>
+				<span>{pull >= PULL_OPEN_PX ? t("releaseForArchive") : t("pullForArchive")}</span>
+			</span>
+		</div>
+	) : null
 	// Right click, or holding a finger on a chat, opens its menu.
 	const gesture = useContextMenuGesture((x, y, target) => {
 		const item = target?.closest?.("[data-conversation-id]") as HTMLElement | null
@@ -64,14 +122,16 @@ export function ConversationList({
 	}
 	if (conversations.length === 0) {
 		return (
-			<div className="conv-list">
+			<div className="conv-list" {...pullHandlers}>
+				{pullHint}
 				<div className="conv-item-sub conv-empty">{emptyLabel ?? t("noChatsYet")}</div>
 			</div>
 		)
 	}
 	const now = Date.now()
 	return (
-		<div className="conv-list" {...gesture}>
+		<div className="conv-list" {...gesture} {...pullHandlers}>
+			{pullHint}
 			{conversations.map((conversation) => {
 				const count = unread[conversation.id] ?? 0
 				const label = labelFor(conversation)

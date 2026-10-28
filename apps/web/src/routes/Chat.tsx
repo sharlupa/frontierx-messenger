@@ -91,7 +91,7 @@ import { ScheduledSheet } from "../components/ScheduledSheet"
 import { SafetySheet } from "../components/SafetySheet"
 import { BotBadge } from "../components/BotBadge"
 import { Avatar, Badge, Banner, Button, IconButton, ListGroup, ListItem, Menu, Sheet, SwitchItem, type MenuItemSpec } from "../components/m3"
-import { IAdd, IBell, IBellOff, IClock, ICloudOff, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
+import { IAdd, IArchive, IBack, IEyeOff, IPersonAdd, IBell, IBellOff, IClock, ICloudOff, IClose, IDownload, IGallery, IKey, ILock, ILogout, IMore, IPeople, IPin, ISchedule, ISearch, ISettingsGear, IShield, IStorage, ISwap, ITrash, IPhoneCall } from "../components/m3icons"
 import { SearchEngine } from "../lib/search"
 import { useBackgroundAccounts } from "../lib/backgroundAccounts"
 import { syncWebPush } from "../lib/webpush"
@@ -229,6 +229,9 @@ export function Chat() {
 	const [linkRequest, setLinkRequest] = useState<LinkRequestInfo | null>(null)
 	const [settingsPage, setSettingsPage] = useState<SettingsPageId | null>(null)
 	const [accountMenu, setAccountMenu] = useState<HTMLElement | null>(null)
+	// The ⋮ menu of the chat list: new group, friend requests, archive, ghost mode.
+	const [sidebarMenu, setSidebarMenu] = useState<HTMLElement | null>(null)
+	const [ghostMode, setGhostMode] = useState<boolean | null>(null)
 	const [headerMenu, setHeaderMenu] = useState<HTMLElement | null>(null)
 	// The menu of a chat in the list (right click / long press), and an action
 	// picked there for a chat that first has to be opened.
@@ -516,7 +519,9 @@ export function Chat() {
 				// After an update restart the chat that was open opens again.
 				const reopened = takeReopenedChat()
 				const reopen = reopened && res.conversations.some((conversation) => conversation.id === reopened) ? reopened : null
-				setActiveId((prev) => prev ?? reopen ?? res.conversations.find((conversation) => !conversation.archivedAt)?.id ?? res.conversations[0]?.id ?? null)
+				// The app opens on the chat list, not inside the first chat: a phone
+				// shows the list, a wide screen the list and "choose a chat".
+				setActiveId((prev) => prev ?? reopen)
 				void api.listFriendRequests().then((r) => setFriendRequestCount(r.incoming.length)).catch(() => {})
 				void api.listGroupInvites().then((r) => setGroupInvites(r.invites)).catch(() => {})
 				let pendingInvite: string | null = null
@@ -1769,7 +1774,7 @@ export function Chat() {
 	const activeFolder = useMemo(() => folders.find((folder) => folder.id === activeFolderId) ?? null, [folders, activeFolderId])
 	const orderedConversations = useMemo(() => {
 		let list = conversations.filter((conversation) => showArchived ? Boolean(conversation.archivedAt) : !conversation.archivedAt)
-		if (activeFolder) list = list.filter((conversation) => activeFolder.conversationIds.includes(conversation.id))
+		if (activeFolder && !showArchived) list = list.filter((conversation) => activeFolder.conversationIds.includes(conversation.id))
 		const rank = (conversation: Conversation) => conversation.isSelf ? 0 : (pinnedChats.includes(conversation.id) ? 1 : 2)
 		return [...list].sort((a, b) => rank(a) - rank(b))
 	}, [conversations, showArchived, pinnedChats, activeFolder])
@@ -2370,6 +2375,36 @@ export function Chat() {
 
 	const otherAccounts = accounts.filter((account) => account.id !== currentUserId)
 	const otherUnread = otherAccounts.reduce((total, account) => total + (backgroundUnread[account.id] ?? 0), 0)
+	useEffect(() => {
+		if (!sidebarMenu) return
+		let active = true
+		void api.getSettings().then((res) => { if (active) setGhostMode(res.ghostMode) }).catch(() => undefined)
+		return () => { active = false }
+	}, [sidebarMenu])
+	const toggleGhostMode = () => {
+		const next = !ghostMode
+		setGhostMode(next)
+		void api.setGhostMode(next)
+			.then((res) => setGhostMode(res.ghostMode))
+			.catch(() => {
+				setGhostMode(!next)
+				setError(t("settingsSaveFailed"))
+			})
+	}
+	const archivedCount = conversations.filter((conversation) => conversation.archivedAt).length
+	const sidebarMenuItems: MenuItemSpec[] = [
+		{ key: "group", label: t("newGroup"), icon: <IPeople />, onSelect: () => setShowNew(true) },
+		{ key: "friends", label: t("friendRequests"), icon: <IPersonAdd />, hint: friendRequestCount > 0 ? <Badge count={friendRequestCount} /> : undefined, onSelect: () => setShowFriends(true) },
+		{ key: "archive", label: t("showArchived"), icon: <IArchive />, hint: archivedCount > 0 ? String(archivedCount) : undefined, onSelect: () => setShowArchived(true) },
+		{
+			key: "ghost",
+			label: t("ghostMode"),
+			icon: <IEyeOff />,
+			disabled: ghostMode === null || offline,
+			hint: <span className={"m3-switch menu-switch" + (ghostMode ? " on" : "")} aria-hidden="true"><span className="m3-switch-thumb" /></span>,
+			onSelect: toggleGhostMode,
+		},
+	]
 	const accountMenuItems: MenuItemSpec[] = [
 		...otherAccounts.map((account) => ({
 			key: account.id,
@@ -2436,8 +2471,8 @@ export function Chat() {
 						<BrandLogo size={30} />
 						<span>{offline ? t("offlineShort") : "FrontierX"}</span>
 					</div>
-					<IconButton label={t("friendRequests")} onClick={() => setShowFriends(true)} className="sidebar-header-btn">
-						<IPeople />
+					<IconButton label={t("more")} onClick={(event) => setSidebarMenu(event.currentTarget)} selected={Boolean(sidebarMenu)} className="sidebar-header-btn">
+						<IMore />
 						{friendRequestCount > 0 ? <Badge count={friendRequestCount} className="icon-badge" /> : null}
 					</IconButton>
 				</div>
@@ -2474,22 +2509,23 @@ export function Chat() {
 					/>
 				) : (
 					<>
-						<div className="sidebar-actions">
-							<button className="button primary new-conv-btn" onClick={() => setShowNew(true)}>
-								{t("newConversation")}
-							</button>
-							<button className="sidebar-filter" aria-pressed={showArchived} onClick={() => setShowArchived((value) => !value)}>
-								{showArchived ? t("showActive") : t("showArchived")}
-							</button>
-						</div>
-						<FolderTabs
-							folders={folders}
-							activeFolderId={activeFolderId}
-							allUnread={allUnread}
-							folderUnread={folderUnread}
-							onSelect={(folderId) => setActiveFolderId(folderId)}
-							onManage={() => setShowFolders(true)}
-						/>
+						{showArchived ? (
+							<div className="archive-head">
+								<IconButton label={t("back")} onClick={() => setShowArchived(false)}>
+									<IBack />
+								</IconButton>
+								<span className="archive-head-title">{t("showArchived")}</span>
+							</div>
+						) : (
+							<FolderTabs
+								folders={folders}
+								activeFolderId={activeFolderId}
+								allUnread={allUnread}
+								folderUnread={folderUnread}
+								onSelect={(folderId) => setActiveFolderId(folderId)}
+								onManage={() => setShowFolders(true)}
+							/>
+						)}
 						<ConversationList
 							conversations={orderedConversations}
 							activeId={activeId}
@@ -2499,7 +2535,8 @@ export function Chat() {
 							onlinePeerIds={onlinePeerIds}
 							onSelect={(id) => setActiveId(id)}
 							onContextMenu={(conversation, x, y) => setChatMenu({ conversation, x, y })}
-							emptyLabel={activeFolder ? t("folderEmpty") : t("noChatsYet")}
+							emptyLabel={showArchived ? t("archiveEmpty") : activeFolder ? t("folderEmpty") : t("noChatsYet")}
+							onPullOpen={showArchived ? undefined : () => setShowArchived(true)}
 						/>
 					</>
 				)}
@@ -2792,6 +2829,7 @@ export function Chat() {
 			{linkRequest && keys.status === "ready" ? <LinkApprovalSheet request={linkRequest} onClose={() => setLinkRequest(null)} /> : null}
 			{safetyTarget ? <SafetySheet peerName={safetyTarget.name} peerKey={safetyTarget.key} ownKey={keys.status === "ready" ? keys.session.publicKey : null} onClose={() => setSafetyTarget(null)} /> : null}
 			{accountMenu ? <Menu anchor={accountMenu} items={accountMenuItems} onClose={() => setAccountMenu(null)} align="start" placement="above" /> : null}
+			{sidebarMenu ? <Menu anchor={sidebarMenu} items={sidebarMenuItems} onClose={() => setSidebarMenu(null)} align="end" /> : null}
 			{headerMenu ? <Menu anchor={headerMenu} items={headerMenuItems} onClose={() => setHeaderMenu(null)} /> : null}
 			{chatMenu ? <Menu anchor={null} point={{ x: chatMenu.x, y: chatMenu.y }} items={chatMenuItems(chatMenu.conversation)} onClose={() => setChatMenu(null)} /> : null}
 			{choice === "mute" && choiceConversation ? (

@@ -44,6 +44,8 @@ export const IInfo = (p: Props) => <Svg {...p}><circle cx="12" cy="12" r="9" /><
 export const ILogout = (p: Props) => <Svg {...p}><path d="M14 4h3.5A2.5 2.5 0 0 1 20 6.5v11a2.5 2.5 0 0 1-2.5 2.5H14" /><path d="M10 16.5 5.5 12 10 7.5" /><path d="M5.5 12H15" /></Svg>
 export const ITrash = (p: Props) => <Svg {...p}><path d="M4 7h16" /><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /><path d="M6.5 7l.8 12a1 1 0 0 0 1 .9h7.4a1 1 0 0 0 1-.9l.8-12" /></Svg>
 export const IAdd = (p: Props) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>
+export const IPersonAdd = (p: Props) => <Svg {...p}><circle cx="9.5" cy="8" r="3.5" /><path d="M3 19.5c.7-3.2 3.3-5 6.5-5s5.8 1.8 6.5 5" /><path d="M19 8v6M16 11h6" /></Svg>
+export const IArchive = (p: Props) => <Svg {...p}><rect x="3" y="4" width="18" height="5" rx="1.5" /><path d="M5 9v9.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V9" /><path d="M10 13h4" /></Svg>
 export const IChevronRight = (p: Props) => <Svg {...p}><path d="m9.5 6 6 6-6 6" /></Svg>
 export const IBack = (p: Props) => <Svg {...p}><path d="M20 12H5" /><path d="m11 18-6-6 6-6" /></Svg>
 export const IClose = (p: Props) => <Svg {...p}><path d="M6 6l12 12M18 6 6 18" /></Svg>
